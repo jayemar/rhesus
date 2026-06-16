@@ -17,6 +17,9 @@
         title="Toggle star"
         @click.stop="articlesStore.toggleStar(article.id)"
       ><Star :size="16" /></button>
+      <button ref="tagBtn" class="tb-btn" :class="{ active: articleHasLabels }" title="Labels" @click.stop="openTagMenu">
+        <Tag :size="16" />
+      </button>
       <button ref="shareBtn" class="tb-btn" title="Share" @click.stop="openShareMenu">
         <Share2 :size="16" />
       </button>
@@ -30,6 +33,43 @@
       ><ExternalLink :size="16" /></a>
     </footer>
     <Teleport to="body">
+      <div v-if="showTagMenu" class="share-backdrop" @click="showTagMenu = false" />
+      <div
+        v-if="showTagMenu"
+        class="tag-popup"
+        :style="tagPopupStyle"
+        @click.stop
+      >
+        <div v-if="loadingLabels" class="tag-status">Loading...</div>
+        <button
+          v-for="label in labelList"
+          :key="label.id"
+          class="tag-option"
+          @click="toggleLabel(label)"
+        >
+          <span class="tag-dot" :style="{ background: label.bg_color || 'var(--color-text-muted)' }" />
+          <span class="tag-name">{{ label.caption }}</span>
+          <Check v-if="label.checked" :size="13" class="tag-check" />
+        </button>
+        <div class="tag-new">
+          <input
+            v-model="newLabelName"
+            class="tag-new-input"
+            placeholder="New label..."
+            maxlength="64"
+            @keydown.enter.prevent="addLabel"
+            @keydown.stop
+            @click.stop
+          />
+          <button
+            class="tag-new-btn"
+            :disabled="!newLabelName.trim() || creatingLabel"
+            @click.stop="addLabel"
+          >
+            <Plus :size="14" />
+          </button>
+        </div>
+      </div>
       <div v-if="showShareMenu" class="share-backdrop" @click="showShareMenu = false" />
       <div
         v-if="showShareMenu"
@@ -47,10 +87,11 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Mail, MailOpen, Star, ExternalLink, Share2 } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2 } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
+import { getLabels, setArticleLabel, createLabel } from '@/api/articles'
 import { writeToClipboard } from '@/utils/clipboard'
-import type { ApiArticle } from '@/types/api'
+import type { ApiArticle, ApiLabel } from '@/types/api'
 
 const props = defineProps<{ article: ApiArticle }>()
 const emit = defineEmits<{ close: [], copied: [label: string] }>()
@@ -60,7 +101,79 @@ const showShareMenu = ref(false)
 const shareBtn = ref<HTMLElement | null>(null)
 const sharePopupStyle = ref<Record<string, string>>({})
 
+const showTagMenu = ref(false)
+const tagBtn = ref<HTMLElement | null>(null)
+const tagPopupStyle = ref<Record<string, string>>({})
+const labelList = ref<ApiLabel[]>([])
+const loadingLabels = ref(false)
+const labelsLoaded = ref(false)
+const newLabelName = ref('')
+const creatingLabel = ref(false)
+
+const articleHasLabels = computed(() => {
+  if (labelsLoaded.value) return labelList.value.some((l) => l.checked)
+  return (props.article.labels?.length ?? 0) > 0
+})
+
+async function openTagMenu() {
+  showShareMenu.value = false
+  if (showTagMenu.value) {
+    showTagMenu.value = false
+    return
+  }
+  if (tagBtn.value) {
+    const rect = tagBtn.value.getBoundingClientRect()
+    const popupWidth = 220
+    let left = rect.left + rect.width / 2 - popupWidth / 2
+    left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
+    tagPopupStyle.value = {
+      bottom: `${window.innerHeight - rect.top + 8}px`,
+      left: `${left}px`,
+      width: `${popupWidth}px`,
+    }
+  }
+  showTagMenu.value = true
+  loadingLabels.value = true
+  labelsLoaded.value = false
+  try {
+    labelList.value = await getLabels(props.article.id)
+    labelsLoaded.value = true
+  } finally {
+    loadingLabels.value = false
+  }
+}
+
+async function addLabel() {
+  const caption = newLabelName.value.trim()
+  if (!caption || creatingLabel.value) return
+  creatingLabel.value = true
+  try {
+    const result = await createLabel(caption)
+    await setArticleLabel(props.article.id, result.id, true)
+    const existing = labelList.value.find((l) => l.id === result.id)
+    if (existing) {
+      existing.checked = true
+    } else {
+      labelList.value.push({ id: result.id, caption: result.caption, fg_color: '', bg_color: '', checked: true })
+    }
+    newLabelName.value = ''
+  } finally {
+    creatingLabel.value = false
+  }
+}
+
+async function toggleLabel(label: ApiLabel) {
+  const next = !label.checked
+  label.checked = next
+  try {
+    await setArticleLabel(props.article.id, label.id, next)
+  } catch {
+    label.checked = !next
+  }
+}
+
 function openShareMenu() {
+  showTagMenu.value = false
   if (shareBtn.value) {
     const rect = shareBtn.value.getBoundingClientRect()
     const popupWidth = 200
@@ -191,6 +304,99 @@ const readerContent = computed(() =>
 
 .tb-btn.active :deep(path), .tb-btn.active :deep(polygon) {
   fill: currentColor;
+}
+
+:global(.tag-popup) {
+  position: fixed;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  z-index: 200;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+:global(.tag-status) {
+  padding: 12px 16px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+:global(.tag-option) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  text-align: left;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  transition: background var(--transition-fast);
+}
+
+:global(.tag-option:hover) {
+  background: var(--color-surface);
+}
+
+:global(.tag-dot) {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+:global(.tag-name) {
+  flex: 1;
+}
+
+:global(.tag-check) {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+:global(.tag-new) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+:global(.tag-new-input) {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  padding: 4px 6px;
+}
+
+:global(.tag-new-input::placeholder) {
+  color: var(--color-text-muted);
+}
+
+:global(.tag-new-btn) {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+
+:global(.tag-new-btn:hover:not(:disabled)) {
+  background: var(--color-surface);
+}
+
+:global(.tag-new-btn:disabled) {
+  color: var(--color-text-muted);
+  cursor: default;
 }
 
 :global(.share-popup) {

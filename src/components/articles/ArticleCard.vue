@@ -38,9 +38,7 @@
       <div class="card-right">
         <div class="card-right-top">
           <Star v-if="article.marked" class="star-badge" :size="11" aria-label="Starred" />
-          <svg v-if="article.labels && article.labels.length" class="label-badge" viewBox="0 0 12 12" width="11" height="11" aria-label="Labelled">
-            <path fill="currentColor" fill-rule="evenodd" d="M1 1h6l4 5-4 5H1z M2.2 6a1 1 0 1 0 2 0 1 1 0 1 0-2 0z"/>
-          </svg>
+          <Tag v-if="article.labels && article.labels.length" class="label-badge" :size="11" aria-label="Labelled" />
           <span class="timestamp">{{ articleDate }}</span>
         </div>
         <div v-if="showThumbs && thumbUrl" class="card-thumb">
@@ -54,7 +52,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import { Star, Check, Rss } from 'lucide-vue-next'
+import { Star, Check, Rss, Tag } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'
@@ -376,8 +374,12 @@ function onCardClick() {
 }
 
 .label-badge {
-  color: var(--color-text-muted);
+  color: var(--color-starred);
   flex-shrink: 0;
+}
+
+.label-badge :deep(path), .label-badge :deep(polygon) {
+  fill: currentColor;
 }
 
 .timestamp {

@@ -8,6 +8,23 @@
     <link rel="icon" href="/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rhesus</title>
+    <script>
+      // Firefox for Android reads the address-bar title from the second argument
+      // of history.pushState/replaceState, not from document.title changes made
+      // after the call. Vue Router passes '' for that argument. Patch here,
+      // before any module scripts (including the router), so every call carries
+      // 'Rhesus'. Also set document.title synchronously for good measure.
+      (function () {
+        function wrap(orig) {
+          return function (state, _title, url) {
+            document.title = 'Rhesus';
+            return orig.call(this, state, 'Rhesus', url);
+          };
+        }
+        history.pushState = wrap(history.pushState);
+        history.replaceState = wrap(history.replaceState);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

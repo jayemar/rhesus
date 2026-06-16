@@ -30,12 +30,26 @@
         <span class="brand-name">Rhesus</span>
       </button>
       <FeedTree />
+      <div class="sidebar-footer">
+        <button
+          class="sidebar-footer-btn"
+          :class="{ active: showFeedEditor }"
+          title="Manage feeds"
+          @click="toggleFeedEditor"
+        >
+          <Rss :size="14" />
+          <span>Manage feeds</span>
+        </button>
+      </div>
     </aside>
 
     <!-- Main content -->
     <main class="main-content">
       <template v-if="showSettings">
         <SettingsPanel />
+      </template>
+      <template v-else-if="showFeedEditor">
+        <FeedEditor />
       </template>
       <template v-else>
         <ArticleList />
@@ -79,7 +93,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { writeToClipboard } from '@/utils/clipboard'
@@ -87,6 +101,7 @@ import { useFeedsStore } from '@/stores/feeds'
 import { useArticlesStore } from '@/stores/articles'
 import { useSettingsStore } from '@/stores/settings'
 import FeedTree from '@/components/feeds/FeedTree.vue'
+import FeedEditor from '@/components/feeds/FeedEditor.vue'
 import ArticleList from '@/components/articles/ArticleList.vue'
 import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
@@ -106,6 +121,7 @@ const unreadCount = computed(() => articles.value.filter((a) => a.unread).length
 
 const confirmMarkAll = ref(false)
 const showSettings = ref(false)
+const showFeedEditor = ref(false)
 const copyToast = ref<string | null>(null)
 const historyPushed = ref(false)
 const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
@@ -228,7 +244,13 @@ async function markAll() {
 }
 
 function toggleSettings() {
+  showFeedEditor.value = false
   showSettings.value = !showSettings.value
+}
+
+function toggleFeedEditor() {
+  showSettings.value = false
+  showFeedEditor.value = !showFeedEditor.value
 }
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
@@ -412,6 +434,33 @@ async function refresh() {
   font-size: var(--font-size-lg);
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.sidebar-footer-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.sidebar-footer-btn:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
+}
+
+.sidebar-footer-btn.active {
+  color: var(--color-accent);
 }
 
 .main-content {

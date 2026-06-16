@@ -38,5 +38,13 @@ export default defineConfig({
       },
       dependencies: ['setup'],
     },
+    {
+      name: 'firefox',
+      use: {
+        ...devices['Desktop Firefox'],
+        storageState: 'e2e/.auth/user.json',
+      },
+      dependencies: ['setup'],
+    },
   ],
 })

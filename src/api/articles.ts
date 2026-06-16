@@ -1,5 +1,5 @@
 import { call } from './client'
-import type { ApiArticle } from '@/types/api'
+import type { ApiArticle, ApiLabel } from '@/types/api'
 
 export interface GetHeadlinesOptions {
   feedId: number
@@ -64,4 +64,26 @@ export async function updateArticle(
 
 export async function catchupFeed(feedId: number, isCategory: boolean): Promise<void> {
   await call('catchupFeed', { feed_id: feedId, is_cat: isCategory })
+}
+
+export async function getLabels(articleId: number): Promise<ApiLabel[]> {
+  return call<ApiLabel[]>('getLabels', { article_id: articleId })
+}
+
+export async function setArticleLabel(
+  articleId: number,
+  labelId: number,
+  assign: boolean,
+): Promise<void> {
+  await call('setArticleLabel', {
+    article_ids: String(articleId),
+    label_id: labelId,
+    assign,
+  })
+}
+
+export async function createLabel(
+  caption: string,
+): Promise<{ id: number; caption: string; created: boolean }> {
+  return call('createLabel', { caption })
 }

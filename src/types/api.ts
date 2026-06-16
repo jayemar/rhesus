@@ -27,8 +27,12 @@ export interface ApiFeed {
   unread: number
   has_icon: boolean
   cat_id: number
-  feed_url?: string
+  feed_url: string
   type?: 'feed'
+  last_updated?: number
+  last_error?: string
+  update_interval?: number
+  order_id?: number
 }
 
 export interface ApiFeedTreeItem {
@@ -52,6 +56,15 @@ export interface ApiAttachment {
   height?: number
 }
 
+export interface ApiLabel {
+  id: number
+  caption: string
+  fg_color: string
+  bg_color: string
+  checked: boolean
+}
+
+
 export interface ApiArticle {
   id: number
   title: string
@@ -67,7 +80,7 @@ export interface ApiArticle {
   content: string
   excerpt?: string
   attachments?: ApiAttachment[]
-  labels?: unknown[]
+  labels?: [number, string, string, string][]
   score?: number
   note?: string
   lang?: string

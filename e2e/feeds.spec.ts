@@ -19,7 +19,7 @@ test('clicking a feed loads articles', async ({ page }) => {
   await feedItem.click()
 
   await expect(page.locator('.article-list')).toBeVisible({ timeout: 10000 })
-  await expect(page).toHaveURL(/\/(feed|category)\//)
+  await expect(page).toHaveURL(/#\/(feed|category)\//)
 })
 
 test('URL updates when feed is selected', async ({ page }) => {
@@ -29,7 +29,7 @@ test('URL updates when feed is selected', async ({ page }) => {
   const feedItem = page.locator('.feed-item').first()
   await feedItem.click()
 
-  await expect(page).toHaveURL(/\/(feed|category)\/[-\d]+/)
+  await expect(page).toHaveURL(/#\/(feed|category)\/[-\d]+/)
 })
 
 test('refreshing preserves selected feed', async ({ page }) => {

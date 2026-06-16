@@ -1,7 +1,49 @@
 <template>
   <nav class="feed-tree">
-    <template v-for="item in treeWithUnread" :key="item.id">
-      <template v-if="item.type === 'category'">
+    <template v-for="item in organizedTree" :key="item.id">
+      <template v-if="item.type === 'divider'">
+        <div class="section-divider" />
+      </template>
+      <template v-else-if="item.type === 'cat-group'">
+        <button
+          class="category-row"
+          :class="{ open: openCats.has(item.bare_id) }"
+          @click="toggleCat(item.bare_id)"
+        >
+          <span class="chevron">
+            <ChevronDown v-if="openCats.has(item.bare_id)" :size="12" />
+            <ChevronRight v-else :size="12" />
+          </span>
+          <span class="cat-title">{{ item.name }}</span>
+          <span v-if="item.unread > 0" class="feed-unread">{{ item.unread }}</span>
+        </button>
+        <div v-if="openCats.has(item.bare_id)" class="category-feeds">
+          <template v-for="cat in item.items" :key="cat.id">
+            <button
+              class="category-row subcategory-row"
+              :class="{ open: openCats.has(cat.bare_id) }"
+              @click="toggleCat(cat.bare_id)"
+            >
+              <span class="chevron">
+                <ChevronDown v-if="openCats.has(cat.bare_id)" :size="12" />
+                <ChevronRight v-else :size="12" />
+              </span>
+              <span class="cat-title">{{ cat.name }}</span>
+              <span v-if="cat.unread > 0" class="feed-unread">{{ cat.unread }}</span>
+            </button>
+            <div v-if="openCats.has(cat.bare_id)" class="category-feeds subcategory-feeds">
+              <FeedItem
+                v-for="feed in cat.items ?? []"
+                :key="feed.id"
+                :item="feed"
+                :selected="isFeedSelected(feed)"
+                @select="selectFeed(feed)"
+              />
+            </div>
+          </template>
+        </div>
+      </template>
+      <template v-else-if="item.type === 'category'">
         <button
           class="category-row"
           :class="{ open: openCats.has(item.bare_id) }"
@@ -44,6 +86,11 @@ import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import FeedItem from './FeedItem.vue'
 import type { ApiFeedTreeItem } from '@/types/api'
 
+type SentinelItem =
+  | { type: 'divider'; id: string; bare_id: number }
+  | { type: 'cat-group'; id: string; name: string; bare_id: number; unread: number; items: ApiFeedTreeItem[] }
+type TreeRow = ApiFeedTreeItem | SentinelItem
+
 const router = useRouter()
 const route = useRoute()
 const feedsStore = useFeedsStore()
@@ -79,6 +126,39 @@ const treeWithUnread = computed(() => {
     viewMode: 'unread',
   }
   return insertAfter(tree.value, -4, virtual)
+})
+
+const organizedTree = computed((): TreeRow[] => {
+  const result: TreeRow[] = []
+  const userCats: ApiFeedTreeItem[] = []
+
+  for (const item of treeWithUnread.value) {
+    if (item.type === 'category' && item.bare_id === -1) {
+      result.push({ ...item, name: 'Lists' })
+    } else if (item.type === 'category' && item.bare_id === -2) {
+      result.push({ type: 'divider', id: 'divider-labels', bare_id: -998 })
+      result.push(item)
+    } else if (item.type === 'category' && item.bare_id >= 0) {
+      userCats.push(item)
+    } else {
+      result.push(item)
+    }
+  }
+
+  if (userCats.length > 0) {
+    const totalUnread = userCats.reduce((sum, c) => sum + (c.unread ?? 0), 0)
+    result.push({ type: 'divider', id: 'divider-cats', bare_id: -997 })
+    result.push({
+      type: 'cat-group',
+      id: 'cat-group-categories',
+      name: 'Categories',
+      bare_id: -996,
+      unread: totalUnread,
+      items: userCats,
+    })
+  }
+
+  return result
 })
 
 function isFeedSelected(feed: ApiFeedTreeItem): boolean {
@@ -119,6 +199,12 @@ function selectFeed(item: ApiFeedTreeItem) {
   padding: 8px 0;
 }
 
+.section-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 6px 0;
+}
+
 .category-row {
   display: flex;
   align-items: center;
@@ -137,6 +223,14 @@ function selectFeed(item: ApiFeedTreeItem) {
 .category-row:hover {
   background: var(--color-surface-raised);
   color: var(--color-text-primary);
+}
+
+.subcategory-row {
+  padding-left: 24px;
+}
+
+.subcategory-feeds {
+  padding-left: 12px;
 }
 
 .chevron {

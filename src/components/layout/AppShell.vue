@@ -27,7 +27,10 @@
     <aside class="sidebar">
       <button class="sidebar-brand" title="All articles" @click="navigateHome">
         <img src="/favicon.svg" class="brand-icon" alt="" />
-        <span class="brand-name">Rhesus</span>
+        <span class="brand-text">
+          <span class="brand-name">Rhesus</span>
+          <span class="brand-meta">v{{ appVersion }} &middot; {{ buildDate }}</span>
+        </span>
       </button>
       <FeedTree />
       <div class="sidebar-footer">
@@ -63,7 +66,7 @@
             <div class="reader-scroll">
               <h1
                 class="reader-title"
-                :class="{ 'reader-title--pressable': settings.long_press_title !== 'none' }"
+                @click="openTitleLink"
                 @pointerdown="onTitlePointerDown"
                 @pointerup="onTitlePointerUp"
                 @pointermove="onTitlePointerCancel"
@@ -107,6 +110,9 @@ import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiFeedTreeItem } from '@/types/api'
+
+const appVersion = __APP_VERSION__
+const buildDate = __BUILD_DATE__
 
 const route = useRoute()
 const router = useRouter()
@@ -254,8 +260,10 @@ function toggleFeedEditor() {
 }
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let titleLongPressExecuted = false
 
 function onTitlePointerDown(e: PointerEvent) {
+  titleLongPressExecuted = false
   if (settings.value.long_press_title === 'none') return
   longPressTimer = setTimeout(() => {
     longPressTimer = null
@@ -278,7 +286,17 @@ function onTitlePointerCancel() {
   }
 }
 
+function openTitleLink() {
+  if (titleLongPressExecuted) {
+    titleLongPressExecuted = false
+    return
+  }
+  const link = selectedArticle.value?.link
+  if (link) window.open(link, '_blank', 'noopener,noreferrer')
+}
+
 async function executeTitleLongPress() {
+  titleLongPressExecuted = true
   const article = selectedArticle.value
   if (!article) return
   const action = settings.value.long_press_title
@@ -430,10 +448,26 @@ async function refresh() {
   flex-shrink: 0;
 }
 
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
 .brand-name {
   font-size: var(--font-size-lg);
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.brand-meta {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .sidebar-footer {
@@ -530,9 +564,6 @@ async function refresh() {
   margin-bottom: 16px;
   padding-right: 40px;
   user-select: none;
-}
-
-.reader-title--pressable {
   cursor: pointer;
 }
 
@@ -580,5 +611,13 @@ async function refresh() {
 .overlay-enter-from .reader-overlay-panel,
 .overlay-leave-to .reader-overlay-panel {
   transform: translateX(100%);
+}
+
+@media (max-width: 600px) {
+  .app-shell:not(.sidebar-collapsed) .topbar-title,
+  .app-shell:not(.sidebar-collapsed) .topbar-actions,
+  .app-shell:not(.sidebar-collapsed) .main-content {
+    display: none;
+  }
 }
 </style>

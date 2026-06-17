@@ -1,7 +1,5 @@
 <template>
   <div class="reader">
-    <div v-if="!article.content" class="reader-loading">Loading article...</div>
-    <div v-else class="reader-content" v-html="readerContent" />
     <footer class="reader-toolbar">
       <button
         class="tb-btn"
@@ -20,6 +18,12 @@
       <button ref="tagBtn" class="tb-btn" :class="{ active: articleHasLabels }" title="Labels" @click.stop="openTagMenu">
         <Tag :size="16" />
       </button>
+      <button
+        class="tb-btn"
+        :class="{ active: showSearch }"
+        title="Search in article"
+        @click.stop="toggleSearch"
+      ><Search :size="16" /></button>
       <button ref="shareBtn" class="tb-btn" title="Share" @click.stop="openShareMenu">
         <Share2 :size="16" />
       </button>
@@ -32,6 +36,38 @@
         @click.stop
       ><ExternalLink :size="16" /></a>
     </footer>
+    <div v-if="showSearch" class="reader-search">
+      <input
+        ref="searchInput"
+        v-model="searchQuery"
+        class="reader-search-input"
+        placeholder="Search..."
+        @input="doSearch"
+        @keydown.enter.prevent="nextMatch"
+        @keydown.shift.enter.prevent="prevMatch"
+        @keydown.esc="closeSearch"
+        @keydown.stop
+        @click.stop
+      />
+      <span v-if="matchCount > 0" class="reader-search-count">{{ currentMatchIndex + 1 }} / {{ matchCount }}</span>
+      <span v-else-if="searchQuery" class="reader-search-count reader-search-none">No results</span>
+      <button class="tb-btn" :disabled="matchCount === 0" title="Previous match" @click.stop="prevMatch">
+        <ChevronUp :size="14" />
+      </button>
+      <button class="tb-btn" :disabled="matchCount === 0" title="Next match" @click.stop="nextMatch">
+        <ChevronDown :size="14" />
+      </button>
+      <button class="tb-btn" title="Close search" @click.stop="closeSearch"><X :size="14" /></button>
+    </div>
+    <img v-if="heroUrl" class="reader-hero" :src="heroUrl" alt="" />
+    <div v-if="!article.content" class="reader-loading">Loading article...</div>
+    <div v-else ref="contentEl" class="reader-content" v-html="readerContent" />
+    <div v-if="imageAttachments.length" class="reader-attachments">
+      <figure v-for="att in imageAttachments" :key="att.id" class="reader-attachment">
+        <img :src="att.content_url" :alt="att.title" />
+        <figcaption v-if="att.title">{{ att.title }}</figcaption>
+      </figure>
+    </div>
     <Teleport to="body">
       <div v-if="showTagMenu" class="share-backdrop" @click="showTagMenu = false" />
       <div
@@ -86,8 +122,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2 } from 'lucide-vue-next'
+import { ref, computed, nextTick, watch } from 'vue'
+import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
 import { getLabels, setArticleLabel, createLabel } from '@/api/articles'
 import { writeToClipboard } from '@/utils/clipboard'
@@ -96,6 +132,119 @@ import type { ApiArticle, ApiLabel } from '@/types/api'
 const props = defineProps<{ article: ApiArticle }>()
 const emit = defineEmits<{ close: [], copied: [label: string] }>()
 const articlesStore = useArticlesStore()
+
+const showSearch = ref(false)
+const searchQuery = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
+const contentEl = ref<HTMLElement | null>(null)
+const matchCount = ref(0)
+const currentMatchIndex = ref(0)
+let highlights: HTMLElement[] = []
+
+function toggleSearch() {
+  showSearch.value = !showSearch.value
+  if (showSearch.value) {
+    nextTick(() => searchInput.value?.focus())
+  } else {
+    closeSearch()
+  }
+}
+
+function closeSearch() {
+  showSearch.value = false
+  clearHighlights()
+  searchQuery.value = ''
+  matchCount.value = 0
+  currentMatchIndex.value = 0
+}
+
+function clearHighlights() {
+  if (!contentEl.value) return
+  contentEl.value.querySelectorAll('mark.sh').forEach((m) => {
+    const parent = m.parentNode
+    if (parent) {
+      parent.replaceChild(document.createTextNode(m.textContent ?? ''), m)
+      parent.normalize()
+    }
+  })
+  highlights = []
+}
+
+function doSearch() {
+  if (!contentEl.value) return
+  clearHighlights()
+  const q = searchQuery.value.trim()
+  if (!q) {
+    matchCount.value = 0
+    return
+  }
+
+  const walker = document.createTreeWalker(contentEl.value, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  let n: Node | null
+  while ((n = walker.nextNode())) textNodes.push(n as Text)
+
+  const lowerQ = q.toLowerCase()
+  const found: HTMLElement[] = []
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent ?? ''
+    const lower = text.toLowerCase()
+    const parts: Array<string | HTMLElement> = []
+    let last = 0
+    let pos = 0
+    let idx: number
+
+    while ((idx = lower.indexOf(lowerQ, pos)) !== -1) {
+      if (idx > last) parts.push(text.slice(last, idx))
+      const mark = document.createElement('mark')
+      mark.className = 'sh'
+      mark.textContent = text.slice(idx, idx + q.length)
+      parts.push(mark)
+      found.push(mark)
+      last = idx + q.length
+      pos = last
+    }
+
+    if (parts.length > 0) {
+      if (last < text.length) parts.push(text.slice(last))
+      const frag = document.createDocumentFragment()
+      for (const p of parts) {
+        frag.appendChild(typeof p === 'string' ? document.createTextNode(p) : p)
+      }
+      textNode.parentNode!.replaceChild(frag, textNode)
+    }
+  }
+
+  highlights = found
+  matchCount.value = found.length
+  currentMatchIndex.value = found.length > 0 ? 0 : -1
+  if (found.length > 0) scrollToMatch(0)
+}
+
+function scrollToMatch(idx: number) {
+  highlights.forEach((m, i) => m.classList.toggle('sh-active', i === idx))
+  highlights[idx]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+function nextMatch() {
+  if (!matchCount.value) return
+  currentMatchIndex.value = (currentMatchIndex.value + 1) % matchCount.value
+  scrollToMatch(currentMatchIndex.value)
+}
+
+function prevMatch() {
+  if (!matchCount.value) return
+  currentMatchIndex.value = (currentMatchIndex.value - 1 + matchCount.value) % matchCount.value
+  scrollToMatch(currentMatchIndex.value)
+}
+
+watch(() => props.article.id, () => {
+  highlights = []
+  if (showSearch.value && searchQuery.value) {
+    nextTick(() => doSearch())
+  }
+})
 
 const showShareMenu = ref(false)
 const shareBtn = ref<HTMLElement | null>(null)
@@ -127,7 +276,7 @@ async function openTagMenu() {
     let left = rect.left + rect.width / 2 - popupWidth / 2
     left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
     tagPopupStyle.value = {
-      bottom: `${window.innerHeight - rect.top + 8}px`,
+      top: `${rect.bottom + 8}px`,
       left: `${left}px`,
       width: `${popupWidth}px`,
     }
@@ -180,7 +329,7 @@ function openShareMenu() {
     let left = rect.left + rect.width / 2 - popupWidth / 2
     left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
     sharePopupStyle.value = {
-      bottom: `${window.innerHeight - rect.top + 8}px`,
+      top: `${rect.bottom + 8}px`,
       left: `${left}px`,
       width: `${popupWidth}px`,
     }
@@ -216,16 +365,56 @@ async function copy(type: 'title' | 'link' | 'markdown') {
   }
 }
 
-const readerContent = computed(() =>
-  (props.article.content ?? '').replace(/https?:\/\/localhost(:\d+)?/g, ''),
-)
+// Use the browser's own DOMParser to find the first content image and extract it
+// as a hero, removing it from the body to avoid showing it twice. The content URL
+// is used rather than flavor_image because TT-RSS rewrites content URLs to its
+// local image cache while flavor_image retains the original external URL.
+function parseHero(content: string): { src: string | null; bodyHtml: string } {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(content, 'text/html')
+  const img = doc.querySelector('img[src]')
+  if (!img) return { src: null, bodyHtml: doc.body.innerHTML }
+
+  const src = img.getAttribute('src') ?? ''
+  if (!src || src.startsWith('data:')) return { src: null, bodyHtml: doc.body.innerHTML }
+
+  const figure = img.closest('figure')
+  if (figure) figure.remove()
+  else img.remove()
+
+  return { src, bodyHtml: doc.body.innerHTML }
+}
+
+const heroUrl = computed(() => {
+  const content = (props.article.content ?? '').replace(/https?:\/\/localhost(:\d+)?/g, '')
+  if (!content) return props.article.flavor_image ?? null
+  const { src } = parseHero(content)
+  return src ?? props.article.flavor_image ?? null
+})
+
+const readerContent = computed(() => {
+  const content = (props.article.content ?? '').replace(/https?:\/\/localhost(:\d+)?/g, '')
+  if (!content) return ''
+  if (!heroUrl.value) return content
+  return parseHero(content).bodyHtml
+})
+
+const imageAttachments = computed(() => {
+  const atts = props.article.attachments ?? []
+  if (!atts.length) return []
+  const images = atts.filter(
+    (a) => a.content_type?.startsWith('image/') && a.content_url !== heroUrl.value
+  )
+  if (!images.length) return []
+  if (props.article.always_display_attachments) return images
+  if (!props.article.content) return images
+  return []
+})
 </script>
 
 <style scoped>
 .reader {
-  padding: 16px;
   background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
 }
 
 .reader-loading {
@@ -235,17 +424,84 @@ const readerContent = computed(() =>
   font-size: var(--font-size-sm);
 }
 
+.reader-hero {
+  width: 100%;
+  max-height: 380px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  display: block;
+}
+
+.reader-attachments {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reader-attachment img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+}
+
+.reader-attachment figcaption {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
 .reader-content {
-  font-size: var(--font-size-base);
-  line-height: 1.7;
+  font-size: var(--font-size-sm);
+  line-height: 1.75;
   color: var(--color-text-primary);
   max-width: 720px;
+}
+
+.reader-content :deep(p) {
+  margin: 0 0 1.1em;
+}
+
+.reader-content :deep(h1),
+.reader-content :deep(h2),
+.reader-content :deep(h3),
+.reader-content :deep(h4) {
+  font-weight: 700;
+  line-height: var(--line-height-tight);
+  margin: 1.5em 0 0.5em;
+}
+
+.reader-content :deep(h1) { font-size: 1.35em; }
+.reader-content :deep(h2) { font-size: 1.2em; }
+.reader-content :deep(h3) { font-size: 1.05em; }
+
+.reader-content :deep(ul),
+.reader-content :deep(ol) {
+  padding-left: 1.5em;
+  margin: 0 0 1.1em;
+}
+
+.reader-content :deep(li) {
+  margin-bottom: 0.4em;
+}
+
+.reader-content :deep(figure) {
+  margin: 1.5em 0;
+}
+
+.reader-content :deep(figcaption) {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin-top: 6px;
 }
 
 .reader-content :deep(img) {
   max-width: 100%;
   height: auto;
   border-radius: 4px;
+  display: block;
 }
 
 .reader-content :deep(a) {
@@ -258,21 +514,23 @@ const readerContent = computed(() =>
   padding: 12px;
   border-radius: 4px;
   font-size: var(--font-size-sm);
+  margin: 0 0 1.1em;
 }
 
 .reader-content :deep(blockquote) {
   border-left: 3px solid var(--color-border);
-  padding-left: 12px;
+  padding-left: 1em;
+  margin: 0 0 1.1em;
   color: var(--color-text-secondary);
 }
 
 .reader-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: 12px;
-  margin-top: 12px;
-  border-top: 1px solid var(--color-border);
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .tb-btn {
@@ -428,5 +686,51 @@ const readerContent = computed(() =>
   position: fixed;
   inset: 0;
   z-index: 199;
+}
+
+.reader-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reader-search-input {
+  flex: 1;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  outline: none;
+  min-width: 0;
+}
+
+.reader-search-input:focus {
+  border-color: var(--color-accent);
+}
+
+.reader-search-count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.reader-search-none {
+  color: var(--color-danger);
+}
+
+.reader-content :deep(mark.sh) {
+  background: rgba(255, 213, 0, 0.3);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.reader-content :deep(mark.sh-active) {
+  background: rgba(255, 160, 0, 0.6);
 }
 </style>

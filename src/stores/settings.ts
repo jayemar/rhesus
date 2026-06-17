@@ -39,6 +39,9 @@ export const useSettingsStore = defineStore('settings', () => {
   function applyFont(size: number, family: string) {
     const root = document.documentElement
     root.style.setProperty('--font-size-base', `${size}px`)
+    root.style.setProperty('--font-size-sm', `${size - 2}px`)
+    root.style.setProperty('--font-size-lg', `${size + 2}px`)
+    root.style.setProperty('--font-size-xl', `${size + 4}px`)
     root.style.setProperty('--font-body', FONT_FAMILY_MAP[family] ?? "system-ui, -apple-system, sans-serif")
   }
 

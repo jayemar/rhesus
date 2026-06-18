@@ -48,15 +48,9 @@
 
     <!-- Main content -->
     <main class="main-content">
-      <template v-if="showSettings">
-        <SettingsPanel />
-      </template>
-      <template v-else-if="showFeedEditor">
-        <FeedEditor />
-      </template>
-      <template v-else>
-        <ArticleList />
-      </template>
+      <ArticleList />
+      <SettingsPanel v-if="showSettings" class="content-overlay" />
+      <FeedEditor v-if="showFeedEditor" class="content-overlay" />
 
       <Transition name="overlay">
         <div v-if="selectedArticle" class="reader-overlay" @keydown.esc="closeReader">
@@ -505,8 +499,16 @@ async function refresh() {
   position: relative;
 }
 
-.reader-overlay {
+.content-overlay {
   position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: var(--color-surface);
+  overflow-y: auto;
+}
+
+.reader-overlay {
+  position: fixed;
   inset: 0;
   z-index: 20;
   display: flex;
@@ -520,11 +522,9 @@ async function refresh() {
 
 .reader-overlay-panel {
   position: relative;
-  margin-left: auto;
-  width: min(720px, 100%);
+  width: 100%;
   height: 100%;
   background: var(--color-surface);
-  border-left: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;

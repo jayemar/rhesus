@@ -62,6 +62,14 @@ export async function updateArticle(
   })
 }
 
+export async function saveArticleNote(id: number, note: string): Promise<void> {
+  await call('updateArticle', {
+    article_ids: String(id),
+    field: ArticleField.Note,
+    data: note,
+  })
+}
+
 export async function catchupFeed(feedId: number, isCategory: boolean): Promise<void> {
   await call('catchupFeed', { feed_id: feedId, is_cat: isCategory })
 }

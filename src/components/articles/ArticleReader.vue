@@ -19,6 +19,12 @@
         <Tag :size="16" />
       </button>
       <button
+        class="tb-btn note-btn"
+        :class="{ active: currentNote }"
+        :title="currentNote ? 'Edit note' : 'Add note'"
+        @click.stop="toggleNote"
+      ><StickyNote :size="16" /></button>
+      <button
         class="tb-btn"
         :class="{ active: showSearch }"
         title="Search in article"
@@ -59,16 +65,39 @@
       </button>
       <button class="tb-btn" title="Close search" @click.stop="closeSearch"><X :size="14" /></button>
     </div>
-    <img v-if="heroUrl" class="reader-hero" :src="heroUrl" alt="" />
+    <div v-if="showNote" class="reader-note">
+      <textarea
+        ref="noteInput"
+        v-model="noteText"
+        class="reader-note-input"
+        placeholder="Add a note..."
+        @keydown.stop
+        @click.stop
+      />
+      <div class="reader-note-actions">
+        <button class="reader-note-save" :disabled="noteSaving" @click.stop="saveNote">Save</button>
+        <button class="reader-note-cancel" @click.stop="cancelNote">Cancel</button>
+      </div>
+    </div>
+    <img v-if="heroUrl" class="reader-hero" :src="heroUrl" :alt="heroAlt" @click="openLightbox(heroUrl!, heroAlt)" />
     <div v-if="!article.content" class="reader-loading">Loading article...</div>
-    <div v-else ref="contentEl" class="reader-content" v-html="readerContent" />
+    <div v-else ref="contentEl" class="reader-content" v-html="readerContent" @click="onContentClick" />
     <div v-if="imageAttachments.length" class="reader-attachments">
       <figure v-for="att in imageAttachments" :key="att.id" class="reader-attachment">
-        <img :src="att.content_url" :alt="att.title" />
+        <img :src="att.content_url" :alt="att.title" @click="openLightbox(att.content_url, att.title)" />
         <figcaption v-if="att.title">{{ att.title }}</figcaption>
       </figure>
     </div>
     <Teleport to="body">
+      <div v-if="lightboxSrc" ref="lightboxEl" class="lightbox" @click="closeLightbox">
+        <img
+          class="lightbox-img"
+          :src="lightboxSrc"
+          :alt="lightboxAlt"
+          :style="{ transform: `scale(${imageScale})` }"
+        />
+        <p v-if="lightboxAlt" class="lightbox-caption">{{ lightboxAlt }}</p>
+      </div>
       <div v-if="showTagMenu" class="share-backdrop" @click="showTagMenu = false" />
       <div
         v-if="showTagMenu"
@@ -123,15 +152,148 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown, StickyNote } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
-import { getLabels, setArticleLabel, createLabel } from '@/api/articles'
+import { getLabels, setArticleLabel, createLabel, saveArticleNote } from '@/api/articles'
 import { writeToClipboard } from '@/utils/clipboard'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
 const props = defineProps<{ article: ApiArticle }>()
 const emit = defineEmits<{ close: [], copied: [label: string] }>()
 const articlesStore = useArticlesStore()
+
+const lightboxSrc = ref<string | null>(null)
+const lightboxAlt = ref('')
+const lightboxEl = ref<HTMLElement | null>(null)
+const imageScale = ref(1)
+
+let pinchStartDist = 0
+let pinchStartScale = 1
+
+function getPinchDist(e: TouchEvent): number {
+  const dx = e.touches[0]!.clientX - e.touches[1]!.clientX
+  const dy = e.touches[0]!.clientY - e.touches[1]!.clientY
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
+function onLightboxTouchStart(e: TouchEvent) {
+  if (e.touches.length === 2) {
+    e.preventDefault()
+    pinchStartDist = getPinchDist(e)
+    pinchStartScale = imageScale.value
+  }
+}
+
+function onLightboxTouchMove(e: TouchEvent) {
+  if (e.touches.length === 2) {
+    e.preventDefault()
+    const dist = getPinchDist(e)
+    imageScale.value = Math.min(5, Math.max(0.25, pinchStartScale * (dist / pinchStartDist)))
+  }
+}
+
+function onLightboxWheel(e: WheelEvent) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    const factor = e.deltaY > 0 ? 0.9 : 1.1
+    imageScale.value = Math.min(5, Math.max(0.25, imageScale.value * factor))
+  }
+}
+
+function attachLightboxZoomListeners() {
+  const el = lightboxEl.value
+  if (!el) return
+  el.addEventListener('touchstart', onLightboxTouchStart, { passive: false })
+  el.addEventListener('touchmove', onLightboxTouchMove, { passive: false })
+  el.addEventListener('wheel', onLightboxWheel, { passive: false })
+}
+
+function detachLightboxZoomListeners() {
+  const el = lightboxEl.value
+  if (!el) return
+  el.removeEventListener('touchstart', onLightboxTouchStart)
+  el.removeEventListener('touchmove', onLightboxTouchMove)
+  el.removeEventListener('wheel', onLightboxWheel)
+}
+
+async function openLightbox(src: string, alt: string) {
+  imageScale.value = 1
+  lightboxSrc.value = src
+  lightboxAlt.value = alt
+  history.pushState({ lightbox: true }, '')
+  // Capture phase so stopImmediatePropagation() blocks AppShell's bubble-phase handler.
+  window.addEventListener('popstate', onLightboxPopstate, { capture: true })
+  document.addEventListener('keydown', onLightboxKey)
+  await nextTick()
+  attachLightboxZoomListeners()
+}
+
+function closeLightbox() {
+  if (!lightboxSrc.value) return
+  detachLightboxZoomListeners()
+  window.removeEventListener('popstate', onLightboxPopstate, { capture: true })
+  document.removeEventListener('keydown', onLightboxKey)
+  lightboxSrc.value = null
+  // Suppress the popstate that history.back() fires so AppShell doesn't close the reader.
+  const suppress = (e: PopStateEvent) => { e.stopImmediatePropagation() }
+  window.addEventListener('popstate', suppress, { capture: true, once: true })
+  history.back()
+}
+
+function onLightboxPopstate(e: PopStateEvent) {
+  e.stopImmediatePropagation()
+  detachLightboxZoomListeners()
+  window.removeEventListener('popstate', onLightboxPopstate, { capture: true })
+  document.removeEventListener('keydown', onLightboxKey)
+  lightboxSrc.value = null
+}
+
+function onLightboxKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeLightbox()
+}
+
+function onContentClick(e: MouseEvent) {
+  const img = (e.target as HTMLElement).closest('img')
+  if (img) openLightbox((img as HTMLImageElement).src, img.alt)
+}
+
+const showNote = ref(false)
+const noteText = ref('')
+const noteSaving = ref(false)
+const noteInput = ref<HTMLTextAreaElement | null>(null)
+const currentNote = ref(props.article.note ?? '')
+
+watch(() => props.article.id, () => {
+  showNote.value = false
+  currentNote.value = props.article.note ?? ''
+})
+
+function toggleNote() {
+  if (!showNote.value) {
+    noteText.value = currentNote.value
+    showNote.value = true
+    nextTick(() => noteInput.value?.focus())
+  } else {
+    showNote.value = false
+  }
+}
+
+async function saveNote() {
+  noteSaving.value = true
+  try {
+    const note = noteText.value.trim()
+    await saveArticleNote(props.article.id, note)
+    articlesStore.setNote(props.article.id, note)
+    currentNote.value = note
+    showNote.value = false
+  } finally {
+    noteSaving.value = false
+  }
+}
+
+function cancelNote() {
+  showNote.value = false
+}
 
 const showSearch = ref(false)
 const searchQuery = ref('')
@@ -292,6 +454,15 @@ async function openTagMenu() {
   }
 }
 
+function syncLabelsToStore() {
+  articlesStore.setLabels(
+    props.article.id,
+    labelList.value
+      .filter((l) => l.checked)
+      .map((l) => [l.id, l.caption, l.fg_color, l.bg_color] as [number, string, string, string]),
+  )
+}
+
 async function addLabel() {
   const caption = newLabelName.value.trim()
   if (!caption || creatingLabel.value) return
@@ -305,6 +476,7 @@ async function addLabel() {
     } else {
       labelList.value.push({ id: result.id, caption: result.caption, fg_color: '', bg_color: '', checked: true })
     }
+    syncLabelsToStore()
     newLabelName.value = ''
   } finally {
     creatingLabel.value = false
@@ -316,6 +488,7 @@ async function toggleLabel(label: ApiLabel) {
   label.checked = next
   try {
     await setArticleLabel(props.article.id, label.id, next)
+    syncLabelsToStore()
   } catch {
     label.checked = !next
   }
@@ -369,45 +542,65 @@ async function copy(type: 'title' | 'link' | 'markdown') {
 // as a hero, removing it from the body to avoid showing it twice. The content URL
 // is used rather than flavor_image because TT-RSS rewrites content URLs to its
 // local image cache while flavor_image retains the original external URL.
-function parseHero(content: string): { src: string | null; bodyHtml: string } {
+function parseHero(content: string): { src: string | null; alt: string; bodyHtml: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(content, 'text/html')
   const img = doc.querySelector('img[src]')
-  if (!img) return { src: null, bodyHtml: doc.body.innerHTML }
+  if (!img) return { src: null, alt: '', bodyHtml: doc.body.innerHTML }
 
   const src = img.getAttribute('src') ?? ''
-  if (!src || src.startsWith('data:')) return { src: null, bodyHtml: doc.body.innerHTML }
+  if (!src || src.startsWith('data:')) return { src: null, alt: '', bodyHtml: doc.body.innerHTML }
 
+  const alt = img.getAttribute('alt') ?? ''
   const figure = img.closest('figure')
   if (figure) figure.remove()
   else img.remove()
 
-  return { src, bodyHtml: doc.body.innerHTML }
+  return { src, alt, bodyHtml: doc.body.innerHTML }
 }
 
+// Strip any origin from TT-RSS-internal URLs so they resolve as relative paths
+// through the frontend proxy, regardless of hostname (localhost, Tailscale, etc.)
+const normalizedContent = computed(() =>
+  (props.article.content ?? '').replace(/https?:\/\/[^/]+(\/tt-rss\/)/g, '$1')
+)
+
 const heroUrl = computed(() => {
-  const content = (props.article.content ?? '').replace(/https?:\/\/localhost(:\d+)?/g, '')
+  const content = normalizedContent.value
   if (!content) return props.article.flavor_image ?? null
   const { src } = parseHero(content)
   return src ?? props.article.flavor_image ?? null
 })
 
+const heroAlt = computed(() => {
+  const content = normalizedContent.value
+  if (!content) return ''
+  return parseHero(content).alt
+})
+
 const readerContent = computed(() => {
-  const content = (props.article.content ?? '').replace(/https?:\/\/localhost(:\d+)?/g, '')
+  const content = normalizedContent.value
   if (!content) return ''
   if (!heroUrl.value) return content
   return parseHero(content).bodyHtml
 })
 
+function toRelativeUrl(url: string): string {
+  return url.replace(/^https?:\/\/[^/]+(\/tt-rss\/)/, '$1')
+}
+
 const imageAttachments = computed(() => {
   const atts = props.article.attachments ?? []
   if (!atts.length) return []
-  const images = atts.filter(
-    (a) => a.content_type?.startsWith('image/') && a.content_url !== heroUrl.value
-  )
+  const images = atts
+    .filter((a) => a.content_type?.startsWith('image/'))
+    .map((a) => ({ ...a, content_url: toRelativeUrl(a.content_url) }))
+    .filter((a) => a.content_url !== heroUrl.value)
   if (!images.length) return []
   if (props.article.always_display_attachments) return images
-  if (!props.article.content) return images
+  // Show enclosure images when content has no inline images (e.g. BBC-style
+  // articles with text-only content and a thumbnail-only enclosure)
+  if (!heroUrl.value) return images
   return []
 })
 </script>
@@ -431,6 +624,7 @@ const imageAttachments = computed(() => {
   border-radius: 6px;
   margin-bottom: 20px;
   display: block;
+  cursor: zoom-in;
 }
 
 .reader-attachments {
@@ -445,6 +639,7 @@ const imageAttachments = computed(() => {
   height: auto;
   border-radius: 6px;
   display: block;
+  cursor: zoom-in;
 }
 
 .reader-attachment figcaption {
@@ -454,7 +649,7 @@ const imageAttachments = computed(() => {
 }
 
 .reader-content {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   line-height: 1.75;
   color: var(--color-text-primary);
   max-width: 720px;
@@ -502,6 +697,7 @@ const imageAttachments = computed(() => {
   height: auto;
   border-radius: 4px;
   display: block;
+  cursor: zoom-in;
 }
 
 .reader-content :deep(a) {
@@ -724,6 +920,99 @@ const imageAttachments = computed(() => {
   color: var(--color-danger);
 }
 
+.reader-note {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reader-note-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
+  resize: vertical;
+  outline: none;
+}
+
+.reader-note-input:focus {
+  border-color: var(--color-accent);
+}
+
+.reader-note-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+
+.reader-note-save,
+.reader-note-cancel {
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border: none;
+  font-family: var(--font-body);
+}
+
+.reader-note-save {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.reader-note-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.reader-note-cancel {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+.note-btn.active :deep(path), .note-btn.active :deep(rect) {
+  fill: currentColor;
+}
+
+:global(.lightbox) {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  cursor: zoom-out;
+  touch-action: none;
+  overflow: hidden;
+}
+
+:global(.lightbox-img) {
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 4px;
+  transform-origin: center center;
+}
+
+:global(.lightbox-caption) {
+  color: #fff;
+  font-size: var(--font-size-sm);
+  text-align: center;
+  margin-top: 12px;
+  max-width: 720px;
+}
+
 .reader-content :deep(mark.sh) {
   background: rgba(255, 213, 0, 0.3);
   color: inherit;
@@ -732,5 +1021,11 @@ const imageAttachments = computed(() => {
 
 .reader-content :deep(mark.sh-active) {
   background: rgba(255, 160, 0, 0.6);
+}
+</style>
+
+<style>
+[data-theme='dark'] .reader-note-save {
+  color: #1a1a1a;
 }
 </style>

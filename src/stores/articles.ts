@@ -99,6 +99,16 @@ export const useArticlesStore = defineStore('articles', () => {
     }
   }
 
+  function setNote(id: number, note: string) {
+    const article = articles.value.find((a) => a.id === id)
+    if (article) article.note = note
+  }
+
+  function setLabels(id: number, labels: [number, string, string, string][]) {
+    const article = articles.value.find((a) => a.id === id)
+    if (article) article.labels = labels
+  }
+
   async function markAllRead(feedId: number, isCategory: boolean) {
     await catchupFeed(feedId, isCategory)
     articles.value.forEach((a) => (a.unread = false))
@@ -115,6 +125,6 @@ export const useArticlesStore = defineStore('articles', () => {
 
   return {
     articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder,
-    load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, select,
+    load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, select, setNote, setLabels,
   }
 })

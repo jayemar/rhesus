@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rhesus Share - Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <h1>Rhesus Share Settings</h1>
+
+  <div class="field">
+    <label for="ttrss-url">TT-RSS URL</label>
+    <input id="ttrss-url" type="url" placeholder="https://your-ttrss.example.com" />
+  </div>
+
+  <div class="field">
+    <label for="username">Username</label>
+    <input id="username" type="text" autocomplete="username" />
+  </div>
+
+  <fieldset class="auth-mode">
+    <legend>Authentication method</legend>
+    <label class="radio-label">
+      <input type="radio" name="auth-mode" value="password" checked />
+      Password
+    </label>
+    <label class="radio-label">
+      <input type="radio" name="auth-mode" value="apppassword" />
+      App password
+    </label>
+    <p id="app-password-hint" class="hint" style="display:none">
+      Generate one in TT-RSS: Preferences &rarr; Security &rarr; App Passwords.
+      Label it &ldquo;Rhesus Share&rdquo;.
+    </p>
+  </fieldset>
+
+  <div class="field">
+    <label for="password" id="password-label">Password</label>
+    <input id="password" type="password" autocomplete="current-password" />
+  </div>
+
+  <div class="actions">
+    <button id="save">Save &amp; Test</button>
+    <span id="status" class="status"></span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

@@ -45,6 +45,20 @@ export const useArticlesStore = defineStore('articles', () => {
     } finally {
       loading.value = false
     }
+    if (viewMode === 'unread' && hasMore.value) {
+      void loadAllPages(feedId, isCategory, viewMode)
+    }
+  }
+
+  async function loadAllPages(feedId: number, isCategory: boolean, viewMode: string) {
+    while (hasMore.value) {
+      if (
+        currentFeedId.value !== feedId ||
+        currentIsCategory.value !== isCategory ||
+        currentViewMode.value !== viewMode
+      ) return
+      await loadMore()
+    }
   }
 
   async function loadMore() {

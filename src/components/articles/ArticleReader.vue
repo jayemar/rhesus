@@ -82,6 +82,7 @@
     <img v-if="heroUrl" class="reader-hero" :src="heroUrl" :alt="heroAlt" @click="openLightbox(heroUrl!, heroAlt)" />
     <div v-if="!article.content" class="reader-loading">Loading article...</div>
     <div v-else ref="contentEl" class="reader-content" v-html="readerContent" @click="onContentClick" />
+    <div v-if="article.content" class="reader-end">* * *</div>
     <div v-if="imageAttachments.length" class="reader-attachments">
       <figure v-for="att in imageAttachments" :key="att.id" class="reader-attachment">
         <img :src="att.content_url" :alt="att.title" @click="openLightbox(att.content_url, att.title)" />
@@ -89,12 +90,20 @@
       </figure>
     </div>
     <Teleport to="body">
-      <div v-if="lightboxSrc" ref="lightboxEl" class="lightbox" @click="closeLightbox">
+      <div
+        v-if="lightboxSrc"
+        ref="lightboxEl"
+        class="lightbox"
+        :style="{ cursor: isDragging ? 'grabbing' : imageScale > 1 ? 'grab' : 'zoom-out' }"
+        @mousedown="onLightboxMouseDown"
+        @click="onLightboxClick"
+      >
         <img
           class="lightbox-img"
           :src="lightboxSrc"
           :alt="lightboxAlt"
-          :style="{ transform: `scale(${imageScale})` }"
+          draggable="false"
+          :style="{ transform: `translate(${panX}px, ${panY}px) scale(${imageScale})` }"
         />
         <p v-if="lightboxAlt" class="lightbox-caption">{{ lightboxAlt }}</p>
       </div>
@@ -166,9 +175,21 @@ const lightboxSrc = ref<string | null>(null)
 const lightboxAlt = ref('')
 const lightboxEl = ref<HTMLElement | null>(null)
 const imageScale = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+const isDragging = ref(false)
 
 let pinchStartDist = 0
 let pinchStartScale = 1
+let hasDragged = false
+let panStartX = 0
+let panStartY = 0
+let panOriginX = 0
+let panOriginY = 0
+let touchPanStartX = 0
+let touchPanStartY = 0
+let touchPanOriginX = 0
+let touchPanOriginY = 0
 
 function getPinchDist(e: TouchEvent): number {
   const dx = e.touches[0]!.clientX - e.touches[1]!.clientX
@@ -181,6 +202,11 @@ function onLightboxTouchStart(e: TouchEvent) {
     e.preventDefault()
     pinchStartDist = getPinchDist(e)
     pinchStartScale = imageScale.value
+  } else if (e.touches.length === 1) {
+    touchPanStartX = e.touches[0]!.clientX
+    touchPanStartY = e.touches[0]!.clientY
+    touchPanOriginX = panX.value
+    touchPanOriginY = panY.value
   }
 }
 
@@ -189,6 +215,10 @@ function onLightboxTouchMove(e: TouchEvent) {
     e.preventDefault()
     const dist = getPinchDist(e)
     imageScale.value = Math.min(5, Math.max(0.25, pinchStartScale * (dist / pinchStartDist)))
+  } else if (e.touches.length === 1) {
+    e.preventDefault()
+    panX.value = touchPanOriginX + e.touches[0]!.clientX - touchPanStartX
+    panY.value = touchPanOriginY + e.touches[0]!.clientY - touchPanStartY
   }
 }
 
@@ -208,16 +238,55 @@ function attachLightboxZoomListeners() {
   el.addEventListener('wheel', onLightboxWheel, { passive: false })
 }
 
+function onLightboxMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  isDragging.value = true
+  hasDragged = false
+  panStartX = e.clientX
+  panStartY = e.clientY
+  panOriginX = panX.value
+  panOriginY = panY.value
+  window.addEventListener('mousemove', onLightboxMouseMove)
+  window.addEventListener('mouseup', onLightboxMouseUp)
+}
+
+function onLightboxMouseMove(e: MouseEvent) {
+  const dx = e.clientX - panStartX
+  const dy = e.clientY - panStartY
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true
+  panX.value = panOriginX + dx
+  panY.value = panOriginY + dy
+}
+
+function onLightboxMouseUp() {
+  isDragging.value = false
+  window.removeEventListener('mousemove', onLightboxMouseMove)
+  window.removeEventListener('mouseup', onLightboxMouseUp)
+}
+
+function onLightboxClick() {
+  if (hasDragged) {
+    hasDragged = false
+    return
+  }
+  closeLightbox()
+}
+
 function detachLightboxZoomListeners() {
   const el = lightboxEl.value
   if (!el) return
   el.removeEventListener('touchstart', onLightboxTouchStart)
   el.removeEventListener('touchmove', onLightboxTouchMove)
   el.removeEventListener('wheel', onLightboxWheel)
+  window.removeEventListener('mousemove', onLightboxMouseMove)
+  window.removeEventListener('mouseup', onLightboxMouseUp)
 }
 
 async function openLightbox(src: string, alt: string) {
   imageScale.value = 1
+  panX.value = 0
+  panY.value = 0
   lightboxSrc.value = src
   lightboxAlt.value = alt
   history.pushState({ lightbox: true }, '')
@@ -607,7 +676,7 @@ const imageAttachments = computed(() => {
 
 <style scoped>
 .reader {
-  background: var(--color-surface);
+  background: transparent;
 }
 
 .reader-loading {
@@ -618,11 +687,12 @@ const imageAttachments = computed(() => {
 }
 
 .reader-hero {
-  width: 100%;
-  max-height: 380px;
+  width: calc(100% + 2 * var(--reader-h-pad, 24px));
+  margin-left: calc(-1 * var(--reader-h-pad, 24px));
+  max-height: 420px;
   object-fit: cover;
-  border-radius: 6px;
-  margin-bottom: 20px;
+  border-radius: 0;
+  margin-bottom: 24px;
   display: block;
   cursor: zoom-in;
 }
@@ -652,7 +722,8 @@ const imageAttachments = computed(() => {
   font-size: var(--font-size-base);
   line-height: 1.75;
   color: var(--color-text-primary);
-  max-width: 720px;
+  max-width: 66ch;
+  margin: 0 auto;
 }
 
 .reader-content :deep(p) {
@@ -714,10 +785,21 @@ const imageAttachments = computed(() => {
 }
 
 .reader-content :deep(blockquote) {
-  border-left: 3px solid var(--color-border);
-  padding-left: 1em;
+  border-left: 4px solid var(--color-accent);
+  padding: 0.75em 1em;
   margin: 0 0 1.1em;
+  background: rgba(128, 128, 128, 0.08);
+  border-radius: 0 4px 4px 0;
+  font-style: italic;
   color: var(--color-text-secondary);
+}
+
+.reader-end {
+  text-align: center;
+  color: var(--color-text-muted);
+  letter-spacing: 0.5em;
+  margin: 2em 0 1em;
+  font-size: var(--font-size-sm);
 }
 
 .reader-toolbar {
@@ -992,9 +1074,9 @@ const imageAttachments = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  cursor: zoom-out;
   touch-action: none;
   overflow: hidden;
+  user-select: none;
 }
 
 :global(.lightbox-img) {

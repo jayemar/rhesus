@@ -28,7 +28,8 @@ export interface SubscribeResult {
 }
 
 export async function addFeed(feedUrl: string, categoryId: number): Promise<SubscribeResult> {
-  return call<SubscribeResult>('subscribeToFeed', { feed_url: feedUrl, category_id: categoryId })
+  const res = await call<{ status: SubscribeResult }>('subscribeToFeed', { feed_url: feedUrl, category_id: categoryId })
+  return res.status
 }
 
 export async function editFeed(

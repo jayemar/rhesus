@@ -91,6 +91,7 @@ type SentinelItem =
   | { type: 'cat-group'; id: string; name: string; bare_id: number; unread: number; items: ApiFeedTreeItem[] }
 type TreeRow = ApiFeedTreeItem | SentinelItem
 
+const emit = defineEmits<{ navigate: [] }>()
 const router = useRouter()
 const route = useRoute()
 const feedsStore = useFeedsStore()
@@ -115,11 +116,23 @@ function insertAfter(
   return result
 }
 
+function findInTree(items: ApiFeedTreeItem[], bareId: number): ApiFeedTreeItem | undefined {
+  for (const item of items) {
+    if (item.type === 'feed' && item.bare_id === bareId) return item
+    if (item.type === 'category' && item.items) {
+      const found = findInTree(item.items, bareId)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 const treeWithUnread = computed(() => {
+  const allArticlesFeed = findInTree(tree.value, -4)
   const virtual: ApiFeedTreeItem = {
     id: 'virtual-unread',
     name: 'Unread articles',
-    unread: 0,
+    unread: allArticlesFeed?.unread ?? 0,
     type: 'feed',
     bare_id: -4,
     icon: false,
@@ -189,6 +202,7 @@ function selectFeed(item: ApiFeedTreeItem) {
   } else {
     router.replace({ name: 'feed', params: { id: String(item.bare_id) }, query })
   }
+  emit('navigate')
 }
 </script>
 

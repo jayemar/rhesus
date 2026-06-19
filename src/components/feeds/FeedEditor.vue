@@ -41,7 +41,16 @@
 
       <section class="list-section">
         <div class="list-header">
-          <h3>Feeds{{ feeds.length ? ` (${feeds.length})` : '' }}</h3>
+          <h3>Feeds{{ feeds.length ? ` (${filteredFeeds.length})` : '' }}</h3>
+          <input
+            v-if="feeds.length"
+            v-model="searchQuery"
+            class="search-input"
+            type="search"
+            placeholder="Search feeds..."
+            autocomplete="off"
+            autocapitalize="off"
+          />
           <button class="refresh-btn" :disabled="loading" title="Refresh" @click="load">
             <RefreshCw :size="13" :class="{ spinning: loading }" />
           </button>
@@ -49,6 +58,7 @@
 
         <div v-if="loading && !feeds.length" class="list-empty">Loading...</div>
         <div v-else-if="!feeds.length" class="list-empty">No feeds subscribed yet.</div>
+        <div v-else-if="!filteredFeeds.length" class="list-empty">No feeds matching "{{ searchQuery }}".</div>
 
         <div v-else class="feed-list">
           <template v-for="cat in groupedFeeds" :key="cat.id">
@@ -144,6 +154,7 @@ const expandedErrorId = ref<number | null>(null)
 
 const importStatus = ref<string | null>(null)
 const importStatusClass = ref('')
+const searchQuery = ref('')
 
 const opmlExportUrl = '/tt-rss/backend.php?op=opml&method=export'
 
@@ -160,11 +171,17 @@ const catMap = computed(() => {
   return m
 })
 
+const filteredFeeds = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return feeds.value
+  return feeds.value.filter((f) => f.title.toLowerCase().includes(q))
+})
+
 interface CatGroup { id: number; title: string; feeds: ApiFeed[] }
 
 const groupedFeeds = computed((): CatGroup[] => {
   const map = new Map<number, CatGroup>()
-  for (const feed of [...feeds.value].sort((a, b) => a.title.localeCompare(b.title))) {
+  for (const feed of [...filteredFeeds.value].sort((a, b) => a.title.localeCompare(b.title))) {
     const catId = feed.cat_id ?? 0
     if (!map.has(catId)) {
       map.set(catId, { id: catId, title: catMap.value.get(catId) ?? 'Uncategorized', feeds: [] })
@@ -444,6 +461,23 @@ h3 {
 
 .list-header h3 {
   margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--color-accent);
 }
 
 .refresh-btn {

@@ -25,14 +25,14 @@
 
     <!-- Sidebar -->
     <aside class="sidebar">
-      <button class="sidebar-brand" title="All articles" @click="navigateHome">
+      <a class="sidebar-brand" href="/" target="_blank" rel="noopener noreferrer" title="Open Rhesus in new tab">
         <img src="/favicon.svg" class="brand-icon" alt="" />
         <span class="brand-text">
           <span class="brand-name">Rhesus</span>
           <span class="brand-meta">v{{ appVersion }} &middot; {{ buildDate }}</span>
         </span>
-      </button>
-      <FeedTree />
+      </a>
+      <FeedTree @navigate="settings.sidebar_collapsed = true; showFeedEditor = false" />
       <div class="sidebar-footer">
         <button
           class="sidebar-footer-btn"
@@ -56,18 +56,33 @@
         <div v-if="selectedArticle" class="reader-overlay" @keydown.esc="closeReader">
           <div class="reader-overlay-backdrop" @click="closeReader" />
           <div class="reader-overlay-panel">
+            <div class="reader-progress-bar" :style="{ transform: `scaleX(${readerScrollProgress})` }" />
             <button class="reader-close" title="Close" @click="closeReader"><X :size="14" /></button>
-            <div class="reader-scroll">
+            <div ref="readerScrollEl" class="reader-scroll" @scroll="onReaderScroll">
               <h1
                 class="reader-title"
                 @click="openTitleLink"
+                @contextmenu.prevent
                 @pointerdown="onTitlePointerDown"
                 @pointerup="onTitlePointerUp"
                 @pointermove="onTitlePointerCancel"
                 @pointercancel="onTitlePointerCancel"
               >{{ selectedArticle.title }}</h1>
+              <div class="reader-meta">
+                <span v-if="selectedArticle.author">{{ selectedArticle.author }}</span>
+                <span>{{ selectedArticle.feed_title }}</span>
+                <span>{{ formatArticleDate(selectedArticle.updated) }}</span>
+                <span v-if="readingTime(selectedArticle.content) > 0">
+                  {{ readingTime(selectedArticle.content) }} min read
+                </span>
+              </div>
               <ArticleReader :article="selectedArticle" @close="closeReader" @copied="showCopyToast" />
             </div>
+            <Transition name="fade">
+              <button v-if="showScrollTop" class="scroll-top-btn" title="Back to top" @click="scrollToTop">
+                <ChevronUp :size="16" />
+              </button>
+            </Transition>
           </div>
         </div>
       </Transition>
@@ -90,7 +105,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, ChevronUp } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { writeToClipboard } from '@/utils/clipboard'
@@ -126,6 +141,34 @@ const copyToast = ref<string | null>(null)
 const historyPushed = ref(false)
 const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
 const suppressNextSidebarCollapse = ref(true)
+
+const readerScrollEl = ref<HTMLElement | null>(null)
+const readerScrollProgress = ref(0)
+const showScrollTop = ref(false)
+
+function onReaderScroll() {
+  const el = readerScrollEl.value
+  if (!el) return
+  const max = el.scrollHeight - el.clientHeight
+  readerScrollProgress.value = max > 0 ? el.scrollTop / max : 0
+  showScrollTop.value = el.scrollTop > 300
+}
+
+function scrollToTop() {
+  readerScrollEl.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function formatArticleDate(ts: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+  }).format(new Date(ts * 1000))
+}
+
+function readingTime(content: string | undefined): number {
+  if (!content) return 0
+  const words = content.replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length
+  return Math.max(1, Math.ceil(words / 225))
+}
 
 const selectedArticle = computed(() =>
   selectedId.value !== null ? articles.value.find((a) => a.id === selectedId.value) ?? null : null,
@@ -322,16 +365,6 @@ function showCopyToast(label: string) {
   setTimeout(() => { copyToast.value = null }, 2000)
 }
 
-function navigateHome() {
-  settings.value.sidebar_collapsed = false
-  suppressNextSidebarCollapse.value = true
-  const alreadyHome = route.name === 'feed' && String(route.params.id) === '-4' && !route.query.viewMode
-  if (alreadyHome) {
-    articlesStore.load(-4, false)
-  } else {
-    router.replace({ name: 'feed', params: { id: '-4' } })
-  }
-}
 
 async function refresh() {
   const sel = feedsStore.selection
@@ -379,7 +412,6 @@ async function refresh() {
 .topbar-unread {
   font-size: var(--font-size-sm);
   font-weight: 400;
-  color: var(--color-text-muted);
   margin-left: 4px;
 }
 
@@ -524,10 +556,22 @@ async function refresh() {
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--color-surface);
+  background: #1e1c1a;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.reader-progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--color-accent);
+  transform-origin: left;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .reader-close {
@@ -552,19 +596,66 @@ async function refresh() {
 }
 
 .reader-scroll {
+  --reader-h-pad: clamp(24px, 8vw, 80px);
   overflow-y: auto;
   height: 100%;
-  padding: 24px;
+  padding: 24px var(--reader-h-pad);
 }
 
 .reader-title {
-  font-size: var(--font-size-xl);
+  font-size: 2em;
   font-weight: 700;
   line-height: var(--line-height-tight);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   padding-right: 40px;
   user-select: none;
   cursor: pointer;
+}
+
+.reader-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  margin-bottom: 20px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.reader-meta span + span::before {
+  content: ' \B7 ';
+  padding: 0 4px;
+}
+
+.scroll-top-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.scroll-top-btn:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 .copy-toast {
@@ -619,5 +710,11 @@ async function refresh() {
   .app-shell:not(.sidebar-collapsed) .main-content {
     display: none;
   }
+}
+</style>
+
+<style>
+[data-theme='light'] .reader-overlay-panel {
+  background: var(--color-surface);
 }
 </style>

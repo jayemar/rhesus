@@ -95,3 +95,9 @@ export async function createLabel(
 ): Promise<{ id: number; caption: string; created: boolean }> {
   return call('createLabel', { caption })
 }
+
+export async function fetchFullContent(
+  articleId: number,
+): Promise<{ content: string; url: string }> {
+  return call('fetchFullContent', { article_id: articleId })
+}

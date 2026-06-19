@@ -33,6 +33,13 @@
       <button ref="shareBtn" class="tb-btn" title="Share" @click.stop="openShareMenu">
         <Share2 :size="16" />
       </button>
+      <button
+        class="tb-btn"
+        :class="{ active: fullContent !== null }"
+        :disabled="fetchingFull"
+        :title="fullContent !== null ? 'Show feed content' : 'Fetch full article'"
+        @click.stop="toggleFullContent"
+      ><Newspaper :size="16" /></button>
       <a
         class="tb-btn"
         :href="article.link"
@@ -151,6 +158,7 @@
         :style="sharePopupStyle"
         @click.stop
       >
+        <button v-if="canNativeShare" class="share-option" @click="nativeShare">Share...</button>
         <button class="share-option" @click="copy('title')">Copy title</button>
         <button class="share-option" @click="copy('link')">Copy link</button>
         <button class="share-option" @click="copy('markdown')">Copy as markdown link</button>
@@ -161,9 +169,9 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown, StickyNote } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
-import { getLabels, setArticleLabel, createLabel, saveArticleNote } from '@/api/articles'
+import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
 import { writeToClipboard } from '@/utils/clipboard'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
@@ -472,6 +480,8 @@ function prevMatch() {
 
 watch(() => props.article.id, () => {
   highlights = []
+  fullContent.value = null
+  fetchingFull.value = false
   if (showSearch.value && searchQuery.value) {
     nextTick(() => doSearch())
   }
@@ -480,6 +490,9 @@ watch(() => props.article.id, () => {
 const showShareMenu = ref(false)
 const shareBtn = ref<HTMLElement | null>(null)
 const sharePopupStyle = ref<Record<string, string>>({})
+
+const fullContent = ref<string | null>(null)
+const fetchingFull = ref(false)
 
 const showTagMenu = ref(false)
 const tagBtn = ref<HTMLElement | null>(null)
@@ -579,6 +592,36 @@ function openShareMenu() {
   showShareMenu.value = !showShareMenu.value
 }
 
+const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+
+async function nativeShare() {
+  showShareMenu.value = false
+  try {
+    await navigator.share({
+      title: props.article.title ?? undefined,
+      url: props.article.link ?? undefined,
+    })
+  } catch {
+    // user cancelled or share failed - no feedback needed
+  }
+}
+
+async function toggleFullContent() {
+  if (fullContent.value !== null) {
+    fullContent.value = null
+    return
+  }
+  fetchingFull.value = true
+  try {
+    const result = await fetchFullContent(props.article.id)
+    fullContent.value = result.content
+  } catch {
+    emit('copied', 'Could not fetch full content')
+  } finally {
+    fetchingFull.value = false
+  }
+}
+
 function onToggleRead() {
   const markingUnread = !props.article.unread
   articlesStore.markRead(props.article.id, props.article.unread)
@@ -648,6 +691,7 @@ const heroAlt = computed(() => {
 })
 
 const readerContent = computed(() => {
+  if (fullContent.value !== null) return fullContent.value
   const content = normalizedContent.value
   if (!content) return ''
   if (!heroUrl.value) return content

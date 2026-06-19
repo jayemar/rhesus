@@ -50,24 +50,34 @@ any `docker compose up --build frontend`.
 
 ## Step 4 - Install on Firefox for Android
 
-Firefox for Android does not install extensions from arbitrary URLs. The
-extension must be added to an AMO collection first.
+AMO custom collections only work with publicly listed extensions. Since this
+extension is unlisted, the collection approach does not apply. Use the
+"Install from File" method instead.
 
-**Create an AMO collection (one-time setup):**
-
-1. Log in at https://addons.mozilla.org
-2. Go to "My Collections" and create a new collection (e.g. "Homelab")
-3. Add the extension to the collection - search by name or ID (`rhesus-share@homelab`)
-4. Find your numeric AMO User ID in your account settings
-
-**Configure Firefox for Android to use the collection:**
+**Enable "Install from File" in Firefox (one-time setup):**
 
 1. Open Firefox - go to Settings - About Firefox
-2. Tap the Firefox logo 5 times to unlock developer options
-3. Tap "Custom Add-on collection"
-4. Enter your numeric AMO User ID and the collection name
-5. Firefox restarts and loads the collection
+2. Tap the Firefox logo 5 times rapidly until you see "Debug menu enabled"
+3. Go back to Settings - "Install Extension from File" now appears
 
-The extension will now appear in the Add-ons section of Firefox settings.
-Tap "Install", then tap the bookmark icon in the toolbar and "Open Settings"
-to enter your TT-RSS URL and credentials.
+**Transfer the `.xpi` to the device:**
+
+Download it from the homelab nginx server in any browser or file manager on
+the device (e.g. navigate to the Tailscale URL). Firefox will download the
+file rather than install it - this is expected. You need the file on the
+device in order to use "Install from File".
+
+**Install:**
+
+1. Settings - "Install Extension from File"
+2. Browse to the downloaded `.xpi` and tap it
+3. Tap "Add" when prompted
+
+Tap the bookmark icon in the toolbar and "Open Settings" to enter your
+TT-RSS URL and credentials.
+
+**Updating:**
+
+Automatic updates do not work for unlisted extensions. To install a new
+version, sign and copy the updated `.xpi` (Steps 2-3), download it to the
+device, and repeat the install steps above.

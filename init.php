@@ -19,6 +19,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("createLabel", $this);
         $host->add_api_method("editFeed", $this);
         $host->add_api_method("importOpml", $this);
+        $host->add_api_method("fetchFullContent", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
     }
 
@@ -163,6 +164,55 @@ class Rhesus_Settings extends Plugin {
             return [0, ["status" => "OK"]];
         }
         return [1, ["error" => "IMPORT_FAILED"]];
+    }
+
+    // Fetches the full HTML of an article's source URL and returns the body content.
+    // Called via: POST /tt-rss/api/ {"op":"fetchFullContent","sid":"...","article_id":N}
+    public function fetchFullContent(): array {
+        $article_id = (int)($_REQUEST['article_id'] ?? 0);
+        if (!$article_id) {
+            return [1, ["error" => "MISSING_ARTICLE_ID"]];
+        }
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+
+        $sth = Db::pdo()->prepare(
+            "SELECT ttrss_entries.link
+             FROM ttrss_entries
+             JOIN ttrss_user_entries ON ttrss_entries.id = ttrss_user_entries.ref_id
+             WHERE ttrss_user_entries.ref_id = ? AND ttrss_user_entries.owner_uid = ?
+             LIMIT 1"
+        );
+        $sth->execute([$article_id, $uid]);
+        $row = $sth->fetch();
+
+        if (!$row || empty($row['link'])) {
+            return [1, ["error" => "ARTICLE_NOT_FOUND"]];
+        }
+
+        $url = $row['link'];
+        $html = UrlHelper::fetch(['url' => $url]);
+
+        if (!$html) {
+            return [1, ["error" => "FETCH_FAILED"]];
+        }
+
+        $doc = new DOMDocument();
+        @$doc->loadHTML('<?xml encoding="UTF-8">' . $html);
+        $body = $doc->getElementsByTagName('body')->item(0);
+
+        if (!$body) {
+            return [1, ["error" => "PARSE_FAILED"]];
+        }
+
+        $content = '';
+        foreach ($body->childNodes as $child) {
+            $content .= $doc->saveHTML($child);
+        }
+
+        return [0, ["content" => $content, "url" => $url]];
     }
 
     private function default_settings(): array {

@@ -23,8 +23,10 @@
           <input
             v-model="newFeedUrl"
             class="add-input"
-            type="url"
-            placeholder="https://example.com/feed.xml"
+            type="text"
+            placeholder="example.com/feed.xml"
+            autocomplete="off"
+            autocapitalize="off"
             :disabled="adding"
             @keydown.enter.prevent="submitAddFeed"
           />
@@ -253,8 +255,9 @@ async function doDelete() {
 }
 
 async function submitAddFeed() {
-  const url = newFeedUrl.value.trim()
-  if (!url || adding.value) return
+  const raw = newFeedUrl.value.trim()
+  if (!raw || adding.value) return
+  const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
   adding.value = true
   addError.value = null
   try {

@@ -199,20 +199,7 @@ class Rhesus_Settings extends Plugin {
             return [1, ["error" => "FETCH_FAILED"]];
         }
 
-        $doc = new DOMDocument();
-        @$doc->loadHTML('<?xml encoding="UTF-8">' . $html);
-        $body = $doc->getElementsByTagName('body')->item(0);
-
-        if (!$body) {
-            return [1, ["error" => "PARSE_FAILED"]];
-        }
-
-        $content = '';
-        foreach ($body->childNodes as $child) {
-            $content .= $doc->saveHTML($child);
-        }
-
-        return [0, ["content" => $content, "url" => $url]];
+        return [0, ["content" => $html, "url" => $url]];
     }
 
     private function default_settings(): array {

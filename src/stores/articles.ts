@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getHeadlines, getArticle, updateArticle, catchupFeed, ArticleField, ArticleMode } from '@/api/articles'
+import { getHeadlines, getArticle, updateArticle, ArticleField, ArticleMode } from '@/api/articles'
 import { useSettingsStore } from '@/stores/settings'
 import type { ApiArticle } from '@/types/api'
 
@@ -123,9 +123,41 @@ export const useArticlesStore = defineStore('articles', () => {
     if (article) article.labels = labels
   }
 
-  async function markAllRead(feedId: number, isCategory: boolean) {
-    await catchupFeed(feedId, isCategory)
-    articles.value.forEach((a) => (a.unread = false))
+  async function markAllRead() {
+    const ids = articles.value.filter((a) => a.unread).map((a) => a.id)
+    if (ids.length === 0) return
+    articles.value.forEach((a) => { if (a.unread) a.unread = false })
+    try {
+      await updateArticle(ids, ArticleField.Unread, ArticleMode.False)
+    } catch (err) {
+      console.error('markAllRead failed', err)
+    }
+  }
+
+  async function appendNew() {
+    if (!articles.value.length || currentFeedId.value === null) return
+    const sinceId = articles.value.reduce((max, a) => Math.max(max, a.id), 0)
+    loadingMore.value = true
+    try {
+      const results = await getHeadlines({
+        feedId: currentFeedId.value,
+        isCategory: currentIsCategory.value,
+        limit: PAGE_SIZE,
+        skip: 0,
+        sortOrder: sortOrder.value,
+        viewMode: currentViewMode.value,
+        dateSort: settingsStore.settings.date_sort,
+        sinceId,
+      })
+      if (results.length > 0) {
+        const existingIds = new Set(articles.value.map((a) => a.id))
+        articles.value.push(...results.filter((a) => !existingIds.has(a.id)))
+      }
+    } catch (err) {
+      console.error('appendNew failed', err)
+    } finally {
+      loadingMore.value = false
+    }
   }
 
   function select(id: number | null) {
@@ -139,6 +171,6 @@ export const useArticlesStore = defineStore('articles', () => {
 
   return {
     articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder,
-    load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, select, setNote, setLabels,
+    load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, appendNew, select, setNote, setLabels,
   }
 })

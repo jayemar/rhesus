@@ -9,6 +9,7 @@ export interface GetHeadlinesOptions {
   sortOrder?: 'newest' | 'oldest'
   viewMode?: string
   dateSort?: 'retrieval' | 'publication'
+  sinceId?: number
 }
 
 export async function getHeadlines(opts: GetHeadlinesOptions): Promise<ApiArticle[]> {
@@ -17,15 +18,19 @@ export async function getHeadlines(opts: GetHeadlinesOptions): Promise<ApiArticl
     is_cat: opts.isCategory ?? false,
     limit: opts.limit ?? 20,
     skip: opts.skip ?? 0,
+    since_id: opts.sinceId ?? 0,
     order_by: opts.feedId === -1
       ? 'last_marked_asc'
-      : opts.dateSort === 'publication'
-        ? (opts.sortOrder === 'oldest' ? 'date_reverse' : 'feed_dates')
-        : (opts.sortOrder === 'oldest' ? 'date_entered_asc' : 'date_entered_desc'),
+      : opts.feedId === -6
+        ? 'date_entered_desc'
+        : opts.dateSort === 'publication'
+          ? (opts.sortOrder === 'oldest' ? 'date_reverse' : 'feed_dates')
+          : (opts.sortOrder === 'oldest' ? 'date_entered_asc' : 'date_entered_desc'),
     show_excerpt: true,
     excerpt_length: 250,
     show_content: true,
     include_attachments: true,
+    show_thumbnails: true,
     view_mode: opts.viewMode ?? 'all_articles',
     sanitize: false,
   })

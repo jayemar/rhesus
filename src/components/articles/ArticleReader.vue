@@ -169,6 +169,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
+import { Readability } from '@mozilla/readability'
 import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
@@ -614,7 +615,13 @@ async function toggleFullContent() {
   fetchingFull.value = true
   try {
     const result = await fetchFullContent(props.article.id)
-    fullContent.value = result.content
+    const doc = new DOMParser().parseFromString(result.content, 'text/html')
+    doc.documentElement.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+    const base = doc.createElement('base')
+    base.setAttribute('href', result.url)
+    doc.head.appendChild(base)
+    const article = new Readability(doc).parse()
+    fullContent.value = article?.content ?? result.content
   } catch {
     emit('copied', 'Could not fetch full content')
   } finally {
@@ -643,11 +650,22 @@ async function copy(type: 'title' | 'link' | 'markdown') {
     label = 'Markdown link copied'
   }
   try {
-    await writeToClipboard(text)
-    emit('copied', label)
+    const silent = await writeToClipboard(text)
+    if (silent) emit('copied', label)
   } catch {
     emit('copied', 'Copy failed')
   }
+}
+
+// Takes the first URL from a srcset string, handling URLs that contain internal
+// commas (e.g. Cloudinary transformation URLs like w_700,h_700,c_fit/...).
+// Standard srcset separates entries with ", " (comma+space), so splitting on
+// that preserves comma-only URLs while still splitting real multi-entry srcsets.
+function firstSrcsetUrl(srcset: string): string | null {
+  if (!srcset) return null
+  const first = srcset.split(', ')[0]?.trim()
+  if (!first) return null
+  return first.replace(/\s+\d+(\.\d+)?[wx]$/, '').trim() || null
 }
 
 // Use the browser's own DOMParser to find the first content image and extract it
@@ -657,16 +675,28 @@ async function copy(type: 'title' | 'link' | 'markdown') {
 function parseHero(content: string): { src: string | null; alt: string; bodyHtml: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(content, 'text/html')
-  const img = doc.querySelector('img[src]')
+  const img = doc.querySelector('img')
   if (!img) return { src: null, alt: '', bodyHtml: doc.body.innerHTML }
 
-  const src = img.getAttribute('src') ?? ''
+  const alt = img.getAttribute('alt') ?? ''
+  let src: string | null = null
+
+  // Prefer <source data-srcset|srcset> from a parent <picture>: lazy-loaded images
+  // often have a broken or stub src while the real URL lives in data-srcset.
+  const picture = img.closest('picture')
+  if (picture) {
+    const source = picture.querySelector('source[data-srcset], source[srcset]')
+    if (source) {
+      const raw = source.getAttribute('data-srcset') ?? source.getAttribute('srcset') ?? ''
+      src = firstSrcsetUrl(raw)
+    }
+  }
+
+  if (!src) src = img.getAttribute('data-src') ?? img.getAttribute('src') ?? null
   if (!src || src.startsWith('data:')) return { src: null, alt: '', bodyHtml: doc.body.innerHTML }
 
-  const alt = img.getAttribute('alt') ?? ''
-  const figure = img.closest('figure')
-  if (figure) figure.remove()
-  else img.remove()
+  const container = img.closest('figure') ?? picture ?? img
+  container.remove()
 
   return { src, alt, bodyHtml: doc.body.innerHTML }
 }
@@ -679,9 +709,10 @@ const normalizedContent = computed(() =>
 
 const heroUrl = computed(() => {
   const content = normalizedContent.value
-  if (!content) return props.article.flavor_image ?? null
+  const fi = props.article.flavor_image ? toRelativeUrl(props.article.flavor_image) : null
+  if (!content) return fi
   const { src } = parseHero(content)
-  return src ?? props.article.flavor_image ?? null
+  return src ?? fi
 })
 
 const heroAlt = computed(() => {
@@ -707,7 +738,11 @@ const imageAttachments = computed(() => {
   if (!atts.length) return []
   const images = atts
     .filter((a) => a.content_type?.startsWith('image/'))
-    .map((a) => ({ ...a, content_url: toRelativeUrl(a.content_url) }))
+    .map((a) => ({
+      ...a,
+      content_url: toRelativeUrl(a.content_url),
+      title: a.title === 'og:thumbnail' ? '' : (a.title ?? ''),
+    }))
     .filter((a) => a.content_url !== heroUrl.value)
   if (!images.length) return []
   if (props.article.always_display_attachments) return images
@@ -849,7 +884,7 @@ const imageAttachments = computed(() => {
 .reader-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
   padding-bottom: 12px;
   margin-bottom: 12px;
   border-bottom: 1px solid var(--color-border);

@@ -8,6 +8,7 @@
   --color-text-muted: #909090;
   --color-accent: #bbdefb;
   --color-accent-hover: #90caf9;
+  --color-on-accent: #1a1a1a;
   --color-unread-dot: #2196f3;
   --color-starred: #f5a623;
   --color-danger: #e53935;
@@ -42,4 +43,5 @@
   --color-scrollbar: #ccc;
   --color-accent: #1565c0;
   --color-accent-hover: #0d47a1;
+  --color-on-accent: #ffffff;
 }

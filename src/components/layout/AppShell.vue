@@ -19,6 +19,10 @@
           <Sun v-if="settings.theme === 'dark'" :size="16" />
           <Moon v-else :size="16" />
         </button>
+        <button class="icon-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" @click="toggleFullscreen">
+          <Minimize2 v-if="isFullscreen" :size="16" />
+          <Maximize2 v-else :size="16" />
+        </button>
         <button class="icon-btn" title="Settings" @click="toggleSettings"><Settings :size="16" /></button>
       </div>
     </header>
@@ -105,10 +109,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, ChevronUp } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, ChevronUp, Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { writeToClipboard } from '@/utils/clipboard'
 import { useFeedsStore } from '@/stores/feeds'
 import { useArticlesStore } from '@/stores/articles'
 import { useSettingsStore } from '@/stores/settings'
@@ -174,13 +177,42 @@ const selectedArticle = computed(() =>
   selectedId.value !== null ? articles.value.find((a) => a.id === selectedId.value) ?? null : null,
 )
 
+const isFullscreen = ref(!!document.fullscreenElement)
+let manualExitFullscreen = false
+
+function onFullscreenChange() {
+  const nowFullscreen = !!document.fullscreenElement
+  if (!nowFullscreen && isFullscreen.value && !manualExitFullscreen) {
+    // Firefox intercepted back to exit fullscreen - re-enter and close reader if open.
+    void document.documentElement.requestFullscreen().catch(() => { /* nothing to do */ })
+    if (historyPushed.value) {
+      historyPushed.value = false
+      articlesStore.select(null)
+      history.go(-1)
+    }
+  }
+  if (!nowFullscreen) manualExitFullscreen = false
+  isFullscreen.value = nowFullscreen
+}
+
+async function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    await document.documentElement.requestFullscreen()
+  } else {
+    manualExitFullscreen = true
+    await document.exitFullscreen()
+  }
+}
+
 onMounted(() => {
   settingsStore.load()
   window.addEventListener('popstate', onPopState)
+  document.addEventListener('fullscreenchange', onFullscreenChange)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('popstate', onPopState)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
   if (pollTimer !== null) clearInterval(pollTimer)
 })
 
@@ -283,7 +315,7 @@ function toggleTheme() {
 async function markAll() {
   confirmMarkAll.value = false
   const sel = feedsStore.selection
-  if (sel) await articlesStore.markAllRead(sel.id, sel.isCategory)
+  if (sel) await articlesStore.markAllRead()
 }
 
 function toggleSettings() {
@@ -298,10 +330,46 @@ function toggleFeedEditor() {
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
 let titleLongPressExecuted = false
+let pendingCopyEl: HTMLTextAreaElement | null = null
+let pendingCopyLabel = ''
+
+function buildCopyText(): { text: string; label: string } {
+  const article = selectedArticle.value
+  if (!article) return { text: '', label: '' }
+  const action = settings.value.long_press_title
+  if (action === 'copy_text') {
+    const div = document.createElement('div')
+    div.innerHTML = article.content ?? ''
+    return { text: div.textContent ?? '', label: 'Text copied' }
+  }
+  if (action === 'copy_link') return { text: article.link ?? '', label: 'Link copied' }
+  if (action === 'copy_markdown') return { text: `[${article.title}](${article.link})`, label: 'Markdown link copied' }
+  return { text: '', label: '' }
+}
 
 function onTitlePointerDown(e: PointerEvent) {
   titleLongPressExecuted = false
+  pendingCopyEl = null
+  pendingCopyLabel = ''
   if (settings.value.long_press_title === 'none') return
+
+  // Build the copy text and pre-focus a textarea now, while we're inside a
+  // user-gesture handler. execCommand('copy') requires either a synchronous
+  // user gesture or a pre-existing selection — holding focus on a textarea
+  // during the 600 ms timer gives us that without changing the fire-at-600ms UX.
+  const { text, label } = buildCopyText()
+  if (text) {
+    const el = document.createElement('textarea')
+    el.value = text
+    el.setAttribute('readonly', '')
+    el.style.cssText = 'position:absolute;left:-9999px;top:0;width:1px;height:1px;'
+    document.body.appendChild(el)
+    el.focus()
+    el.select()
+    pendingCopyEl = el
+    pendingCopyLabel = label
+  }
+
   longPressTimer = setTimeout(() => {
     longPressTimer = null
     executeTitleLongPress()
@@ -309,10 +377,18 @@ function onTitlePointerDown(e: PointerEvent) {
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
 }
 
+function cleanupPendingCopy() {
+  if (pendingCopyEl) {
+    document.body.removeChild(pendingCopyEl)
+    pendingCopyEl = null
+  }
+}
+
 function onTitlePointerUp() {
   if (longPressTimer !== null) {
     clearTimeout(longPressTimer)
     longPressTimer = null
+    cleanupPendingCopy()
   }
 }
 
@@ -321,6 +397,7 @@ function onTitlePointerCancel() {
     clearTimeout(longPressTimer)
     longPressTimer = null
   }
+  cleanupPendingCopy()
 }
 
 function openTitleLink() {
@@ -332,32 +409,26 @@ function openTitleLink() {
   if (link) window.open(link, '_blank', 'noopener,noreferrer')
 }
 
-async function executeTitleLongPress() {
+function executeTitleLongPress() {
   titleLongPressExecuted = true
-  const article = selectedArticle.value
-  if (!article) return
-  const action = settings.value.long_press_title
-  let text = ''
-  let label = ''
-  if (action === 'copy_text') {
-    const div = document.createElement('div')
-    div.innerHTML = article.content ?? ''
-    text = div.textContent ?? ''
-    label = 'Text copied'
-  } else if (action === 'copy_link') {
-    text = article.link ?? ''
-    label = 'Link copied'
-  } else if (action === 'copy_markdown') {
-    text = `[${article.title}](${article.link})`
-    label = 'Markdown link copied'
+  const el = pendingCopyEl
+  const label = pendingCopyLabel
+  pendingCopyEl = null
+  pendingCopyLabel = ''
+
+  if (el) {
+    el.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(el)
+    if (ok) {
+      navigator.vibrate?.(50)
+      return
+    }
   }
+
+  const { text } = buildCopyText()
   if (!text) return
-  try {
-    await writeToClipboard(text)
-    showCopyToast(label)
-  } catch {
-    showCopyToast('Copy failed')
-  }
+  void navigator.clipboard?.writeText(text).then(() => { navigator.vibrate?.(50) })
 }
 
 function showCopyToast(label: string) {

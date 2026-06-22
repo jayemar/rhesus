@@ -146,8 +146,8 @@ async function executePullAction() {
   pullUpDist.value = 0
   const sel = feedsStore.selection
   if (!sel || articlesStore.loading) return
-  await articlesStore.markAllRead(sel.id, sel.isCategory)
-  await articlesStore.load(sel.id, sel.isCategory, sel.viewMode)
+  await articlesStore.markAllRead()
+  await articlesStore.appendNew()
   await feedsStore.loadTree()
 }
 

@@ -11,6 +11,7 @@
         :is-selected="selectedId === article.id"
         :force-highlight="(feedsStore.selection?.id === -1 || feedsStore.selection?.id === -6) && !feedsStore.selection?.isCategory"
         @select="toggleArticle(article.id)"
+        @copied="(label) => emit('copied', label)"
       />
       <div v-if="articlesStore.loadingMore" class="state-msg state-msg--sm">Loading more...</div>
       <div v-else-if="!articlesStore.hasMore && articles.length > 0" class="state-msg state-msg--sm">
@@ -35,6 +36,8 @@ import { useFeedsStore } from '@/stores/feeds'
 import { useArticlesStore } from '@/stores/articles'
 import { useSettingsStore } from '@/stores/settings'
 import ArticleCard from './ArticleCard.vue'
+
+const emit = defineEmits<{ copied: [label: string] }>()
 
 const feedsStore = useFeedsStore()
 const articlesStore = useArticlesStore()
@@ -128,8 +131,8 @@ function toggleArticle(id: number) {
 
 // Pull-up-to-action: wheel overscroll on desktop, touch swipe on mobile
 const pullUpDist = ref(0)
-const PULL_WHEEL = 150
-const PULL_TOUCH = 64
+const PULL_WHEEL = 300
+const PULL_TOUCH = window.innerHeight * 0.2
 
 const pullUpReady = computed(() => pullUpDist.value >= 1)
 const pullActionLabel = computed(() =>

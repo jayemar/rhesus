@@ -56,6 +56,7 @@ import { Star, Check, Rss, Tag } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'
+import { writeToClipboard } from '@/utils/clipboard'
 import type { ApiArticle } from '@/types/api'
 
 const props = defineProps<{
@@ -64,7 +65,7 @@ const props = defineProps<{
   forceHighlight?: boolean
 }>()
 
-const emit = defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: []; copied: [label: string] }>()
 
 const settingsStore = useSettingsStore()
 const articlesStore = useArticlesStore()
@@ -109,7 +110,7 @@ function decodeHtmlEntities(html: string): string {
 }
 
 const truncatedExcerpt = computed(() => {
-  const text = decodeHtmlEntities(props.article.excerpt ?? '')
+  const text = decodeHtmlEntities(props.article.excerpt ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
   const max = excerptLines.value * 80
   return text.length > max ? text.slice(0, max).trimEnd() + '…' : text
 })
@@ -157,6 +158,42 @@ let pointerActive = false
 let directionLocked = false
 let isHorizontal = false
 let didSwipe = false
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelLongPress() {
+  if (longPressTimer !== null) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+async function executeLongPress() {
+  longPressTimer = null
+  didSwipe = true
+  const action = settings.value.long_press_title
+  if (action === 'none') return
+  let text = ''
+  let label = ''
+  if (action === 'copy_text') {
+    const div = document.createElement('div')
+    div.innerHTML = props.article.content ?? ''
+    text = div.textContent ?? ''
+    label = 'Text copied'
+  } else if (action === 'copy_link') {
+    text = props.article.link ?? ''
+    label = 'Link copied'
+  } else if (action === 'copy_markdown') {
+    text = `[${props.article.title}](${props.article.link})`
+    label = 'Markdown link copied'
+  }
+  if (!text) return
+  try {
+    const needsToast = await writeToClipboard(text)
+    if (needsToast) emit('copied', label)
+  } catch {
+    emit('copied', 'Copy failed')
+  }
+}
 
 const rightBgStyle = computed(() => {
   const progress = Math.min(1, swipeX.value / THRESHOLD)
@@ -191,6 +228,7 @@ function executeAction(action: string) {
 }
 
 function resetSwipe() {
+  cancelLongPress()
   pointerActive = false
   directionLocked = false
   isHorizontal = false
@@ -209,6 +247,7 @@ function onPointerDown(e: PointerEvent) {
   didSwipe = false
   swipeTransition.value = ''
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  longPressTimer = setTimeout(executeLongPress, 600)
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -220,6 +259,7 @@ function onPointerMove(e: PointerEvent) {
     if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
     isHorizontal = Math.abs(dx) > Math.abs(dy)
     directionLocked = true
+    cancelLongPress()
   }
 
   if (!isHorizontal) return
@@ -239,6 +279,7 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp() {
+  cancelLongPress()
   if (!pointerActive) return
   pointerActive = false
 

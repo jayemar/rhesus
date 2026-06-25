@@ -52,7 +52,7 @@
 
     <!-- Main content -->
     <main class="main-content">
-      <ArticleList />
+      <ArticleList @copied="showCopyToast" />
       <SettingsPanel v-if="showSettings" class="content-overlay" />
       <FeedEditor v-if="showFeedEditor" class="content-overlay" />
 
@@ -69,7 +69,7 @@
                 @contextmenu.prevent
                 @pointerdown="onTitlePointerDown"
                 @pointerup="onTitlePointerUp"
-                @pointermove="onTitlePointerCancel"
+                @pointermove="onTitlePointerMove"
                 @pointercancel="onTitlePointerCancel"
               >{{ selectedArticle.title }}</h1>
               <div class="reader-meta">
@@ -121,6 +121,7 @@ import ArticleList from '@/components/articles/ArticleList.vue'
 import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { browserShowsNativeToast } from '@/utils/clipboard'
 import type { ApiFeedTreeItem } from '@/types/api'
 
 const appVersion = __APP_VERSION__
@@ -141,7 +142,6 @@ const confirmMarkAll = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
 const copyToast = ref<string | null>(null)
-const historyPushed = ref(false)
 const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
 const suppressNextSidebarCollapse = ref(true)
 
@@ -178,40 +178,25 @@ const selectedArticle = computed(() =>
 )
 
 const isFullscreen = ref(!!document.fullscreenElement)
-let manualExitFullscreen = false
 
 function onFullscreenChange() {
-  const nowFullscreen = !!document.fullscreenElement
-  if (!nowFullscreen && isFullscreen.value && !manualExitFullscreen) {
-    // Firefox intercepted back to exit fullscreen - re-enter and close reader if open.
-    void document.documentElement.requestFullscreen().catch(() => { /* nothing to do */ })
-    if (historyPushed.value) {
-      historyPushed.value = false
-      articlesStore.select(null)
-      history.go(-1)
-    }
-  }
-  if (!nowFullscreen) manualExitFullscreen = false
-  isFullscreen.value = nowFullscreen
+  isFullscreen.value = !!document.fullscreenElement
 }
 
 async function toggleFullscreen() {
   if (!document.fullscreenElement) {
     await document.documentElement.requestFullscreen()
   } else {
-    manualExitFullscreen = true
     await document.exitFullscreen()
   }
 }
 
 onMounted(() => {
   settingsStore.load()
-  window.addEventListener('popstate', onPopState)
   document.addEventListener('fullscreenchange', onFullscreenChange)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('popstate', onPopState)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   if (pollTimer !== null) clearInterval(pollTimer)
 })
@@ -279,25 +264,8 @@ watch(selection, (newSel) => {
   if (newSel && !settings.value.sidebar_collapsed) settings.value.sidebar_collapsed = true
 })
 
-watch(selectedId, (newId, oldId) => {
-  if (newId !== null && oldId === null) {
-    history.pushState({ articleOverlay: true }, '')
-    historyPushed.value = true
-  }
-})
-
-function onPopState() {
-  historyPushed.value = false
-  articlesStore.select(null)
-}
-
 function closeReader() {
-  if (historyPushed.value) {
-    historyPushed.value = false
-    history.back()
-  } else {
-    articlesStore.select(null)
-  }
+  articlesStore.select(null)
 }
 
 const themeLabel = computed(() =>
@@ -332,6 +300,8 @@ let longPressTimer: ReturnType<typeof setTimeout> | null = null
 let titleLongPressExecuted = false
 let pendingCopyEl: HTMLTextAreaElement | null = null
 let pendingCopyLabel = ''
+let titlePointerStartX = 0
+let titlePointerStartY = 0
 
 function buildCopyText(): { text: string; label: string } {
   const article = selectedArticle.value
@@ -351,6 +321,8 @@ function onTitlePointerDown(e: PointerEvent) {
   titleLongPressExecuted = false
   pendingCopyEl = null
   pendingCopyLabel = ''
+  titlePointerStartX = e.clientX
+  titlePointerStartY = e.clientY
   if (settings.value.long_press_title === 'none') return
 
   // Build the copy text and pre-focus a textarea now, while we're inside a
@@ -400,6 +372,13 @@ function onTitlePointerCancel() {
   cleanupPendingCopy()
 }
 
+function onTitlePointerMove(e: PointerEvent) {
+  if (longPressTimer === null) return
+  const dx = e.clientX - titlePointerStartX
+  const dy = e.clientY - titlePointerStartY
+  if (Math.sqrt(dx * dx + dy * dy) > 10) onTitlePointerCancel()
+}
+
 function openTitleLink() {
   if (titleLongPressExecuted) {
     titleLongPressExecuted = false
@@ -422,13 +401,17 @@ function executeTitleLongPress() {
     document.body.removeChild(el)
     if (ok) {
       navigator.vibrate?.(50)
+      if (!browserShowsNativeToast) showCopyToast(label)
       return
     }
   }
 
   const { text } = buildCopyText()
   if (!text) return
-  void navigator.clipboard?.writeText(text).then(() => { navigator.vibrate?.(50) })
+  void navigator.clipboard?.writeText(text).then(() => {
+    navigator.vibrate?.(50)
+    if (!browserShowsNativeToast) showCopyToast(label)
+  })
 }
 
 function showCopyToast(label: string) {

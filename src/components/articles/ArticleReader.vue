@@ -40,14 +40,9 @@
         :title="fullContent !== null ? 'Show feed content' : 'Fetch full article'"
         @click.stop="toggleFullContent"
       ><Newspaper :size="16" /></button>
-      <a
-        class="tb-btn"
-        :href="article.link"
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Open original"
-        @click.stop
-      ><ExternalLink :size="16" /></a>
+      <button ref="moreBtn" class="tb-btn" title="More options" @click.stop="openMoreMenu">
+        <MoreVertical :size="16" />
+      </button>
     </footer>
     <div v-if="showSearch" class="reader-search">
       <input
@@ -86,7 +81,8 @@
         <button class="reader-note-cancel" @click.stop="cancelNote">Cancel</button>
       </div>
     </div>
-    <img v-if="heroUrl" class="reader-hero" :src="heroUrl" :alt="heroAlt" @click="openLightbox(heroUrl!, heroAlt)" />
+    <img v-if="heroUrl" class="reader-hero" :style="heroCaption ? {} : { marginBottom: '20px' }" :src="heroUrl" :alt="heroAlt" @click="openLightbox(heroUrl!, heroAlt)" />
+    <p v-if="heroCaption" class="reader-hero-caption">{{ heroCaption }}</p>
     <div v-if="!article.content" class="reader-loading">Loading article...</div>
     <div v-else ref="contentEl" class="reader-content" v-html="readerContent" @click="onContentClick" />
     <div v-if="article.content" class="reader-end">* * *</div>
@@ -163,22 +159,42 @@
         <button class="share-option" @click="copy('link')">Copy link</button>
         <button class="share-option" @click="copy('markdown')">Copy as markdown link</button>
       </div>
+      <div v-if="showMoreMenu" class="share-backdrop" @click="showMoreMenu = false" />
+      <div
+        v-if="showMoreMenu"
+        class="share-popup"
+        :style="morePopupStyle"
+        @click.stop
+      >
+        <button class="share-option" @click="promptUnsubscribe">Unsubscribe from feed</button>
+      </div>
+      <ConfirmDialog
+        v-if="feedToUnsubscribe"
+        :message="`Unsubscribe from &quot;${feedToUnsubscribe.title}&quot;?`"
+        @confirm="doUnsubscribe"
+        @cancel="feedToUnsubscribe = null"
+      />
     </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
+import DOMPurify from 'dompurify'
 import { Readability } from '@mozilla/readability'
-import { Mail, MailOpen, Star, Tag, Check, Plus, ExternalLink, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
+import { useFeedsStore } from '@/stores/feeds'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
+import { deleteFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
 const props = defineProps<{ article: ApiArticle }>()
 const emit = defineEmits<{ close: [], copied: [label: string] }>()
 const articlesStore = useArticlesStore()
+const feedsStore = useFeedsStore()
 
 const lightboxSrc = ref<string | null>(null)
 const lightboxAlt = ref('')
@@ -332,7 +348,18 @@ function onLightboxKey(e: KeyboardEvent) {
 
 function onContentClick(e: MouseEvent) {
   const img = (e.target as HTMLElement).closest('img')
-  if (img) openLightbox((img as HTMLImageElement).src, img.alt)
+  if (img) {
+    const caption = (img as HTMLImageElement).alt
+      || stripHtml(img.closest('figure')?.querySelector('figcaption')?.textContent?.trim() ?? '')
+      || ''
+    openLightbox((img as HTMLImageElement).src, caption)
+    return
+  }
+  const a = (e.target as HTMLElement).closest('a')
+  if (a?.href) {
+    e.preventDefault()
+    window.open(a.href, '_blank', 'noopener,noreferrer')
+  }
 }
 
 const showNote = ref(false)
@@ -492,6 +519,11 @@ const showShareMenu = ref(false)
 const shareBtn = ref<HTMLElement | null>(null)
 const sharePopupStyle = ref<Record<string, string>>({})
 
+const showMoreMenu = ref(false)
+const moreBtn = ref<HTMLElement | null>(null)
+const morePopupStyle = ref<Record<string, string>>({})
+const feedToUnsubscribe = ref<{ id: number; title: string } | null>(null)
+
 const fullContent = ref<string | null>(null)
 const fetchingFull = ref(false)
 
@@ -593,6 +625,33 @@ function openShareMenu() {
   showShareMenu.value = !showShareMenu.value
 }
 
+function openMoreMenu() {
+  showShareMenu.value = false
+  if (showMoreMenu.value) { showMoreMenu.value = false; return }
+  if (moreBtn.value) {
+    const rect = moreBtn.value.getBoundingClientRect()
+    const popupWidth = 200
+    let left = rect.left + rect.width / 2 - popupWidth / 2
+    left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
+    morePopupStyle.value = { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${popupWidth}px` }
+  }
+  showMoreMenu.value = true
+}
+
+function promptUnsubscribe() {
+  showMoreMenu.value = false
+  feedToUnsubscribe.value = { id: props.article.feed_id, title: props.article.feed_title ?? 'this feed' }
+}
+
+async function doUnsubscribe() {
+  const feed = feedToUnsubscribe.value
+  feedToUnsubscribe.value = null
+  if (!feed) return
+  await deleteFeed(feed.id)
+  feedsStore.loadTree()
+  emit('close')
+}
+
 const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
 async function nativeShare() {
@@ -668,16 +727,24 @@ function firstSrcsetUrl(srcset: string): string | null {
   return first.replace(/\s+\d+(\.\d+)?[wx]$/, '').trim() || null
 }
 
+// Strip HTML tags from a string to get plain text.
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, '').trim()
+}
+
 // Use the browser's own DOMParser to find the first content image and extract it
 // as a hero, removing it from the body to avoid showing it twice. The content URL
 // is used rather than flavor_image because TT-RSS rewrites content URLs to its
 // local image cache while flavor_image retains the original external URL.
-function parseHero(content: string): { src: string | null; alt: string; bodyHtml: string } {
+// Falls back to data-caption for alt/caption when the standard attributes are empty
+// (Verge stores captions in data-caption rather than alt or figcaption).
+function parseHero(content: string): { src: string | null; alt: string; caption: string; bodyHtml: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(content, 'text/html')
   const img = doc.querySelector('img')
-  if (!img) return { src: null, alt: '', bodyHtml: doc.body.innerHTML }
+  if (!img) return { src: null, alt: '', caption: '', bodyHtml: doc.body.innerHTML }
 
+  const dcText = stripHtml(img.getAttribute('data-caption') ?? '')
   const alt = img.getAttribute('alt') ?? ''
   let src: string | null = null
 
@@ -693,12 +760,13 @@ function parseHero(content: string): { src: string | null; alt: string; bodyHtml
   }
 
   if (!src) src = img.getAttribute('data-src') ?? img.getAttribute('src') ?? null
-  if (!src || src.startsWith('data:')) return { src: null, alt: '', bodyHtml: doc.body.innerHTML }
+  if (!src || src.startsWith('data:')) return { src: null, alt: '', caption: '', bodyHtml: doc.body.innerHTML }
 
   const container = img.closest('figure') ?? picture ?? img
+  const caption = stripHtml(container.querySelector('figcaption')?.textContent?.trim() ?? '') || dcText
   container.remove()
 
-  return { src, alt, bodyHtml: doc.body.innerHTML }
+  return { src, alt, caption, bodyHtml: doc.body.innerHTML }
 }
 
 // Strip any origin from TT-RSS-internal URLs so they resolve as relative paths
@@ -707,26 +775,64 @@ const normalizedContent = computed(() =>
   (props.article.content ?? '').replace(/https?:\/\/[^/]+(\/tt-rss\/)/g, '$1')
 )
 
-const heroUrl = computed(() => {
-  const content = normalizedContent.value
-  const fi = props.article.flavor_image ? toRelativeUrl(props.article.flavor_image) : null
-  if (!content) return fi
-  const { src } = parseHero(content)
-  return src ?? fi
+// Memoizes parseHero for the active content source. Uses fullContent when fetched
+// so that the hero alt text and URL reflect the full article rather than the RSS excerpt.
+const parsedHero = computed(() => {
+  const content = fullContent.value !== null ? fullContent.value : normalizedContent.value
+  if (!content) return null
+  return parseHero(content)
 })
 
-const heroAlt = computed(() => {
-  const content = normalizedContent.value
-  if (!content) return ''
-  return parseHero(content).alt
+const heroUrl = computed(() => {
+  const fi = props.article.flavor_image ? toRelativeUrl(props.article.flavor_image) : null
+  return parsedHero.value?.src ?? fi
 })
+
+const heroAlt = computed(() => parsedHero.value?.alt ?? '')
+
+const heroCaption = computed(() => {
+  if (!heroUrl.value) return ''
+  return parsedHero.value?.caption ?? ''
+})
+
+function processContent(html: string): string {
+  // Preprocess before DOMPurify strips data-* attributes: move data-caption
+  // into alt (for lightbox) and figcaption (for below-image display) when empty.
+  const pre = new DOMParser().parseFromString(html, 'text/html')
+  pre.querySelectorAll('img[data-caption]').forEach(img => {
+    const dc = img.getAttribute('data-caption') ?? ''
+    const dcText = stripHtml(dc)
+    if (!dcText) return
+    const fig = img.closest('figure')
+    if (fig) {
+      const fc = fig.querySelector('figcaption')
+      if (fc && !fc.textContent?.trim()) fc.textContent = dcText
+    } else {
+      const figure = pre.createElement('figure')
+      const figcaption = pre.createElement('figcaption')
+      figcaption.textContent = dcText
+      img.parentNode?.insertBefore(figure, img)
+      figure.appendChild(img)
+      figure.appendChild(figcaption)
+    }
+  })
+  const sanitized = DOMPurify.sanitize(pre.body.innerHTML)
+  const doc = new DOMParser().parseFromString(sanitized, 'text/html')
+  doc.querySelectorAll('table').forEach(table => {
+    const wrapper = doc.createElement('div')
+    wrapper.className = 'table-scroll'
+    table.parentNode?.insertBefore(wrapper, table)
+    wrapper.appendChild(table)
+  })
+  return doc.body.innerHTML
+}
 
 const readerContent = computed(() => {
-  if (fullContent.value !== null) return fullContent.value
-  const content = normalizedContent.value
+  const content = fullContent.value !== null ? fullContent.value : normalizedContent.value
   if (!content) return ''
-  if (!heroUrl.value) return content
-  return parseHero(content).bodyHtml
+  const body = parsedHero.value?.bodyHtml ?? content
+  if (!heroUrl.value) return processContent(content)
+  return processContent(body)
 })
 
 function toRelativeUrl(url: string): string {
@@ -771,9 +877,17 @@ const imageAttachments = computed(() => {
   max-height: 420px;
   object-fit: cover;
   border-radius: 0;
-  margin-bottom: 24px;
+  margin-bottom: 8px;
   display: block;
   cursor: zoom-in;
+}
+
+.reader-hero-caption {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: 0 0 20px;
+  font-style: italic;
 }
 
 .reader-attachments {
@@ -848,6 +962,11 @@ const imageAttachments = computed(() => {
   border-radius: 4px;
   display: block;
   cursor: zoom-in;
+  margin-bottom: 1.5em;
+}
+
+.reader-content :deep(figure img) {
+  margin-bottom: 0;
 }
 
 .reader-content :deep(a) {
@@ -871,6 +990,43 @@ const imageAttachments = computed(() => {
   border-radius: 0 4px 4px 0;
   font-style: italic;
   color: var(--color-text-secondary);
+}
+
+.reader-content :deep(.table-scroll) {
+  overflow-x: auto;
+  margin: 0 0 1.5em;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
+.reader-content :deep(table) {
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  min-width: 100%;
+}
+
+.reader-content :deep(th),
+.reader-content :deep(td) {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reader-content :deep(th:last-child),
+.reader-content :deep(td:last-child) {
+  border-right: none;
+}
+
+.reader-content :deep(th) {
+  font-weight: 600;
+  background: rgba(128, 128, 128, 0.1);
+  white-space: nowrap;
+}
+
+.reader-content :deep(tr:last-child td) {
+  border-bottom: none;
 }
 
 .reader-end {

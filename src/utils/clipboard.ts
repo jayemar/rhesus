@@ -1,6 +1,6 @@
 // Firefox for Android shows a system-level "Copied" notification for ALL clipboard
 // writes (both execCommand and navigator.clipboard), so our own toast is redundant there.
-const browserShowsNativeToast =
+export const browserShowsNativeToast =
   /Firefox\/\d/.test(navigator.userAgent) && /Android/i.test(navigator.userAgent)
 
 // Returns true if the copy was silent (caller should show its own notification).

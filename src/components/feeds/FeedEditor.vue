@@ -129,7 +129,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink } from 'lucide-vue-next'
-import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml } from '@/api/feeds'
+import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl } from '@/api/feeds'
 import { useFeedsStore } from '@/stores/feeds'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiFeed, ApiCategory } from '@/types/api'
@@ -261,7 +261,8 @@ async function submitAddFeed() {
   adding.value = true
   addError.value = null
   try {
-    const result = await addFeed(url, newFeedCatId.value)
+    const resolved = await resolveSubscribeUrl(url)
+    const result = await addFeed(resolved.url, newFeedCatId.value)
     if (result.code === 0) {
       addError.value = 'Already subscribed to that feed.'
     } else if (result.code === 1) {

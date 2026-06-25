@@ -20,6 +20,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("editFeed", $this);
         $host->add_api_method("importOpml", $this);
         $host->add_api_method("fetchFullContent", $this);
+        $host->add_api_method("resolveSubscribeUrl", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
     }
 
@@ -202,6 +203,64 @@ class Rhesus_Settings extends Plugin {
         return [0, ["content" => $html, "url" => $url]];
     }
 
+    // Fetches url and, if HTML with exactly one autodiscovery feed link, returns
+    // the discovered feed URL. Otherwise returns the original URL unchanged.
+    // Works around a TT-RSS bug where subscribeToFeed returns code 6 because it
+    // fails to re-fetch content after extracting the autodiscovered feed URL.
+    public function resolveSubscribeUrl(): array {
+        $url = trim($_REQUEST['url'] ?? '');
+        if ($url === '') return [1, ["error" => "MISSING_URL"]];
+        if (($_SESSION['uid'] ?? null) === null) return [1, ["error" => "NOT_LOGGED_IN"]];
+
+        $parsed = parse_url($url);
+        $scheme = strtolower($parsed['scheme'] ?? '');
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            return [1, ["error" => "INVALID_URL"]];
+        }
+        $host = $parsed['host'] ?? '';
+        $port = isset($parsed['port']) ? (int)$parsed['port'] : ($scheme === 'https' ? 443 : 80);
+        if ($port !== 80 && $port !== 443) {
+            return [1, ["error" => "INVALID_URL"]];
+        }
+        $ip = gethostbyname($host);
+        if (filter_var($ip, FILTER_VALIDATE_IP) &&
+            !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return [1, ["error" => "INVALID_URL"]];
+        }
+
+        $contents = UrlHelper::fetch(['url' => $url]);
+        if (!$contents) return [0, ["url" => $url, "discovered" => false]];
+
+        $ct = UrlHelper::$fetch_last_content_type ?? '';
+        if (!str_contains($ct, 'html')) return [0, ["url" => $url, "discovered" => false]];
+
+        $feedUrls = $this->extractFeedLinks($url, $contents);
+        if (count($feedUrls) === 1) return [0, ["url" => $feedUrls[0], "discovered" => true]];
+
+        return [0, ["url" => $url, "discovered" => false]];
+    }
+
+    private function extractFeedLinks(string $baseUrl, string $html): array {
+        $dom = new DOMDocument();
+        @$dom->loadHTML($html);
+        $xpath = new DOMXPath($dom);
+        $links = $xpath->query('//link[@rel="alternate"]');
+        $feedUrls = [];
+        foreach ($links as $link) {
+            $type = $link->getAttribute('type');
+            $href = $link->getAttribute('href');
+            if (!$href || (!str_contains($type, 'rss') && !str_contains($type, 'atom'))) continue;
+            if (!str_starts_with($href, 'http')) {
+                $parsed = parse_url($baseUrl);
+                $href = str_starts_with($href, '/')
+                    ? $parsed['scheme'] . '://' . $parsed['host'] . $href
+                    : rtrim($baseUrl, '/') . '/' . $href;
+            }
+            $feedUrls[] = $href;
+        }
+        return $feedUrls;
+    }
+
     private function default_settings(): array {
         return [
             "theme"                   => "dark",
@@ -213,6 +272,7 @@ class Rhesus_Settings extends Plugin {
             "mark_on_scroll"          => true,
             "swipe_right_action"      => "none",
             "swipe_left_action"       => "none",
+            "long_press_title"        => "copy_markdown",
             "font_size"               => 14,
             "font_family"             => "system",
             "date_sort"               => "retrieval",

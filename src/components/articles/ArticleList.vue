@@ -58,8 +58,13 @@ onMounted(() => {
         articlesStore.loadMore()
       }
     },
-    { root: listEl.value, rootMargin: '400px' },
+    { rootMargin: '400px' },
   )
+  window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('wheel', onWheel, { passive: true })
+  window.addEventListener('touchstart', onTouchStart, { passive: true })
+  window.addEventListener('touchmove', onTouchMove, { passive: true })
+  window.addEventListener('touchend', onTouchEnd, { passive: true })
 })
 
 watch(sentinelEl, (el, prevEl) => {
@@ -70,13 +75,17 @@ watch(sentinelEl, (el, prevEl) => {
 onUnmounted(() => {
   observer?.disconnect()
   if (wheelResetTimer) clearTimeout(wheelResetTimer)
-  if (listEl.value) {
-    listEl.value.removeEventListener('scroll', onScroll)
-    listEl.value.removeEventListener('wheel', onWheel)
-    listEl.value.removeEventListener('touchstart', onTouchStart)
-    listEl.value.removeEventListener('touchmove', onTouchMove)
-    listEl.value.removeEventListener('touchend', onTouchEnd)
-  }
+  window.removeEventListener('scroll', onScroll)
+  window.removeEventListener('wheel', onWheel)
+  window.removeEventListener('touchstart', onTouchStart)
+  window.removeEventListener('touchmove', onTouchMove)
+  window.removeEventListener('touchend', onTouchEnd)
+})
+
+// Scroll to top when the selected feed changes
+watch(() => feedsStore.selection, () => {
+  window.scrollTo(0, 0)
+  lastScrollTop = 0
 })
 
 // Mark-on-scroll
@@ -84,18 +93,17 @@ let lastScrollTop = 0
 
 const articleById = computed(() => new Map(articles.value.map((a) => [a.id, a])))
 
-function onScroll(e: Event) {
+function onScroll() {
   if (!settings.value.mark_on_scroll) return
-  const el = e.target as HTMLElement
-  const scrollingDown = el.scrollTop > lastScrollTop
-  lastScrollTop = el.scrollTop
+  const scrollY = window.scrollY
+  const scrollingDown = scrollY > lastScrollTop
+  lastScrollTop = scrollY
   if (!scrollingDown) return
 
-  const containerRect = el.getBoundingClientRect()
-  const cutoff = containerRect.top + 100
+  const cutoff = 100
   const map = articleById.value
   const toMark: number[] = []
-  for (const cardEl of el.querySelectorAll('[data-id]')) {
+  for (const cardEl of document.querySelectorAll('[data-id]')) {
     const rect = cardEl.getBoundingClientRect()
     if (rect.bottom >= cutoff) break
     const id = parseInt((cardEl as HTMLElement).dataset['id']!, 10)
@@ -107,23 +115,6 @@ function onScroll(e: Event) {
   }
   if (toMark.length > 0) articlesStore.markReadBatch(toMark)
 }
-
-watch(listEl, (el, prev) => {
-  if (prev) {
-    prev.removeEventListener('scroll', onScroll)
-    prev.removeEventListener('wheel', onWheel)
-    prev.removeEventListener('touchstart', onTouchStart)
-    prev.removeEventListener('touchmove', onTouchMove)
-    prev.removeEventListener('touchend', onTouchEnd)
-  }
-  if (el) {
-    el.addEventListener('scroll', onScroll, { passive: true })
-    el.addEventListener('wheel', onWheel, { passive: true })
-    el.addEventListener('touchstart', onTouchStart, { passive: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: true })
-    el.addEventListener('touchend', onTouchEnd, { passive: true })
-  }
-})
 
 function toggleArticle(id: number) {
   articlesStore.select(selectedId.value === id ? null : id)
@@ -140,9 +131,7 @@ const pullActionLabel = computed(() =>
 )
 
 function isAtBottom(): boolean {
-  const el = listEl.value
-  if (!el) return false
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 8
+  return document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 8
 }
 
 async function executePullAction() {
@@ -207,8 +196,7 @@ function onTouchEnd() {
 
 <style scoped>
 .article-list {
-  overflow-y: auto;
-  height: 100%;
+  min-height: calc(100dvh - var(--topbar-height));
   background: var(--color-bg);
   transition: transform 0.15s ease-out;
 }
@@ -229,7 +217,7 @@ function onTouchEnd() {
 }
 
 .pull-up-indicator {
-  position: absolute;
+  position: fixed;
   bottom: 0;
   left: 0;
   right: 0;

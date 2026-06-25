@@ -142,6 +142,7 @@ const confirmMarkAll = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
 const copyToast = ref<string | null>(null)
+const historyPushed = ref(false)
 const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
 const suppressNextSidebarCollapse = ref(true)
 
@@ -193,10 +194,12 @@ async function toggleFullscreen() {
 
 onMounted(() => {
   settingsStore.load()
+  window.addEventListener('popstate', onPopState)
   document.addEventListener('fullscreenchange', onFullscreenChange)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('popstate', onPopState)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   if (pollTimer !== null) clearInterval(pollTimer)
 })
@@ -264,8 +267,25 @@ watch(selection, (newSel) => {
   if (newSel && !settings.value.sidebar_collapsed) settings.value.sidebar_collapsed = true
 })
 
-function closeReader() {
+watch(selectedId, (newId, oldId) => {
+  if (newId !== null && oldId === null) {
+    history.pushState({ articleOverlay: true }, '')
+    historyPushed.value = true
+  }
+})
+
+function onPopState() {
+  historyPushed.value = false
   articlesStore.select(null)
+}
+
+function closeReader() {
+  if (historyPushed.value) {
+    historyPushed.value = false
+    history.back()
+  } else {
+    articlesStore.select(null)
+  }
 }
 
 const themeLabel = computed(() =>
@@ -429,22 +449,15 @@ async function refresh() {
 
 <style scoped>
 .app-shell {
-  display: grid;
-  grid-template-rows: var(--topbar-height) 1fr;
-  grid-template-columns: var(--sidebar-width) 1fr;
-  grid-template-areas:
-    'topbar topbar'
-    'sidebar main';
-  height: 100%;
-  transition: grid-template-columns var(--transition-normal);
-}
-
-.app-shell.sidebar-collapsed {
-  grid-template-columns: 0 1fr;
+  min-height: 100dvh;
 }
 
 .topbar {
-  grid-area: topbar;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-height);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -494,13 +507,22 @@ async function refresh() {
 }
 
 .sidebar {
-  grid-area: sidebar;
+  position: fixed;
+  top: var(--topbar-height);
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   overflow: hidden;
-  transition: width var(--transition-normal);
   display: flex;
   flex-direction: column;
+  transition: transform var(--transition-normal);
+  z-index: 9;
+}
+
+.sidebar-collapsed .sidebar {
+  transform: translateX(-100%);
 }
 
 .sidebar-brand {
@@ -578,19 +600,30 @@ async function refresh() {
 }
 
 .main-content {
-  grid-area: main;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  margin-top: var(--topbar-height);
+  margin-left: var(--sidebar-width);
+  transition: margin-left var(--transition-normal);
   position: relative;
 }
 
+.sidebar-collapsed .main-content {
+  margin-left: 0;
+}
+
 .content-overlay {
-  position: absolute;
-  inset: 0;
+  position: fixed;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: 0;
   z-index: 10;
   background: var(--color-surface);
   overflow-y: auto;
+  transition: left var(--transition-normal);
+}
+
+.sidebar-collapsed .content-overlay {
+  left: 0;
 }
 
 .reader-overlay {
@@ -759,6 +792,18 @@ async function refresh() {
 }
 
 @media (max-width: 600px) {
+  .sidebar {
+    width: 100%;
+  }
+
+  .main-content {
+    margin-left: 0;
+  }
+
+  .content-overlay {
+    left: 0;
+  }
+
   .app-shell:not(.sidebar-collapsed) .topbar-title,
   .app-shell:not(.sidebar-collapsed) .topbar-actions,
   .app-shell:not(.sidebar-collapsed) .main-content {

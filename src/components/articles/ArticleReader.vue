@@ -44,6 +44,68 @@
         <MoreVertical :size="16" />
       </button>
     </footer>
+    <Teleport defer to=".reader-overlay-panel">
+      <Transition name="fade">
+        <div v-if="scrolled" class="floating-toolbar">
+          <button
+            class="tb-btn"
+            :title="article.unread ? 'Mark as read' : 'Mark as unread'"
+            @click.stop="onToggleRead"
+          >
+            <Mail v-if="article.unread" :size="16" />
+            <MailOpen v-else :size="16" />
+          </button>
+          <button
+            class="tb-btn"
+            :class="{ active: article.marked }"
+            title="Toggle star"
+            @click.stop="articlesStore.toggleStar(article.id)"
+          ><Star :size="16" /></button>
+          <button
+            :ref="(el) => { if (el) tagBtn = el as HTMLButtonElement }"
+            class="tb-btn"
+            :class="{ active: articleHasLabels }"
+            title="Labels"
+            @click.stop="openTagMenu"
+          ><Tag :size="16" /></button>
+          <button
+            class="tb-btn note-btn"
+            :class="{ active: currentNote }"
+            :title="currentNote ? 'Edit note' : 'Add note'"
+            @click.stop="toggleNote"
+          ><StickyNote :size="16" /></button>
+          <button
+            class="tb-btn"
+            :class="{ active: showSearch }"
+            title="Search in article"
+            @click.stop="toggleSearch"
+          ><Search :size="16" /></button>
+          <button
+            :ref="(el) => { if (el) shareBtn = el as HTMLButtonElement }"
+            class="tb-btn"
+            title="Share"
+            @click.stop="openShareMenu"
+          ><Share2 :size="16" /></button>
+          <button
+            class="tb-btn"
+            :class="{ active: fullContent !== null }"
+            :disabled="fetchingFull"
+            :title="fullContent !== null ? 'Show feed content' : 'Fetch full article'"
+            @click.stop="toggleFullContent"
+          ><Newspaper :size="16" /></button>
+          <button
+            :ref="(el) => { if (el) moreBtn = el as HTMLButtonElement }"
+            class="tb-btn"
+            title="More options"
+            @click.stop="openMoreMenu"
+          ><MoreVertical :size="16" /></button>
+          <div class="floating-toolbar-divider" />
+          <button class="tb-btn" title="Back to top" @click.stop="emit('scroll-to-top')">
+            <ChevronUp :size="16" />
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
     <div v-if="showSearch" class="reader-search">
       <input
         ref="searchInput"
@@ -212,8 +274,8 @@ import { writeToClipboard } from '@/utils/clipboard'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
-const props = defineProps<{ article: ApiArticle }>()
-const emit = defineEmits<{ close: [], copied: [label: string] }>()
+const props = defineProps<{ article: ApiArticle, scrolled?: boolean }>()
+const emit = defineEmits<{ close: [], copied: [label: string], 'scroll-to-top': [] }>()
 const articlesStore = useArticlesStore()
 const feedsStore = useFeedsStore()
 const settingsStore = useSettingsStore()
@@ -1474,5 +1536,38 @@ const imageAttachments = computed(() => {
 
 .font-option.active {
   color: var(--color-accent);
+}
+
+.floating-toolbar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.floating-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  margin: 0 4px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

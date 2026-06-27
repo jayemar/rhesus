@@ -86,13 +86,8 @@
                   {{ readingTime(selectedArticle.content) }} min read
                 </span>
               </div>
-              <ArticleReader :article="selectedArticle" @close="closeReader" @copied="showCopyToast" />
+              <ArticleReader :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" />
             </div>
-            <Transition name="fade">
-              <button v-if="showScrollTop" class="scroll-top-btn" title="Back to top" @click="scrollToTop">
-                <ChevronUp :size="16" />
-              </button>
-            </Transition>
           </div>
         </div>
       </Transition>
@@ -123,7 +118,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, ChevronUp, Maximize2, Minimize2 } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
@@ -708,7 +703,10 @@ async function refresh() {
 
 .reader-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100dvh;
   z-index: 20;
   display: flex;
 }
@@ -794,27 +792,6 @@ async function refresh() {
   padding: 0 4px;
 }
 
-.scroll-top-btn {
-  position: absolute;
-  bottom: 24px;
-  right: 24px;
-  z-index: 5;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--color-surface-raised);
-  color: var(--color-text-secondary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.scroll-top-btn:hover {
-  background: var(--color-accent);
-  color: #fff;
-}
 
 .fade-enter-active,
 .fade-leave-active {

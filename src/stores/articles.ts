@@ -19,9 +19,9 @@ export const useArticlesStore = defineStore('articles', () => {
   const settingsStore = useSettingsStore()
 
   const sortOrder = computed<'newest' | 'oldest'>(() =>
-    !currentIsCategory.value && currentFeedId.value === -4 && currentViewMode.value === 'all_articles'
-      ? 'newest'
-      : 'oldest'
+    !currentIsCategory.value && currentFeedId.value === -4 && currentViewMode.value === 'unread'
+      ? 'oldest'
+      : 'newest'
   )
 
   async function load(feedId: number, isCategory: boolean, viewMode = 'all_articles') {

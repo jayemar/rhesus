@@ -9,10 +9,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const FONT_FAMILY_MAP: Record<string, string> = {
     system: "system-ui, -apple-system, sans-serif",
-    helvetica: "'Helvetica Neue', Arial, Helvetica, sans-serif",
-    georgia: "Georgia, 'Times New Roman', serif",
-    verdana: "Verdana, Geneva, sans-serif",
-    palatino: "Palatino, 'Palatino Linotype', 'Book Antiqua', serif",
+    inter: "'Inter', sans-serif",
+    nunito: "'Nunito', sans-serif",
+    merriweather: "'Merriweather', serif",
+    lora: "'Lora', serif",
   }
 
   async function load() {
@@ -32,9 +32,16 @@ export const useSettingsStore = defineStore('settings', () => {
     applyFont(settings.value.font_size, settings.value.font_family)
   }
 
-  function applyTheme(theme: 'dark' | 'light') {
-    document.documentElement.setAttribute('data-theme', theme)
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
+
+  function applyTheme(theme: 'dark' | 'light' | 'system') {
+    const resolved = theme === 'system' ? (systemDark.matches ? 'dark' : 'light') : theme
+    document.documentElement.setAttribute('data-theme', resolved)
   }
+
+  systemDark.addEventListener('change', () => {
+    if (settings.value.theme === 'system') applyTheme('system')
+  })
 
   function applyFont(size: number, family: string) {
     const root = document.documentElement

@@ -16,7 +16,7 @@
         ><CheckCheck :size="16" /></button>
         <button class="icon-btn" title="Refresh" @click="refresh"><RefreshCw :size="16" /></button>
         <button class="icon-btn" :title="themeLabel" @click="toggleTheme">
-          <Sun v-if="settings.theme === 'dark'" :size="16" />
+          <Sun v-if="effectiveTheme === 'dark'" :size="16" />
           <Moon v-else :size="16" />
         </button>
         <button class="icon-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" @click="toggleFullscreen">
@@ -37,7 +37,7 @@
         </span>
       </a>
       <FeedTree @navigate="settings.sidebar_collapsed = true; showFeedEditor = false" />
-      <div class="sidebar-footer">
+      <div class="sidebar-manage">
         <button
           class="sidebar-footer-btn"
           :class="{ active: showFeedEditor }"
@@ -46,6 +46,12 @@
         >
           <Rss :size="14" />
           <span>Manage feeds</span>
+        </button>
+      </div>
+      <div class="sidebar-footer">
+        <button class="sidebar-footer-btn sidebar-footer-btn--signout" title="Sign out" @click="confirmLogout = true">
+          <LogOut :size="14" />
+          <span>Sign out</span>
         </button>
       </div>
     </aside>
@@ -57,7 +63,7 @@
       <FeedEditor v-if="showFeedEditor" class="content-overlay" />
 
       <Transition name="overlay">
-        <div v-if="selectedArticle" class="reader-overlay" @keydown.esc="closeReader">
+        <div v-if="selectedArticle" ref="readerOverlayEl" class="reader-overlay" @keydown.esc="closeReader">
           <div class="reader-overlay-backdrop" @click="closeReader" />
           <div class="reader-overlay-panel">
             <div class="reader-progress-bar" :style="{ transform: `scaleX(${readerScrollProgress})` }" />
@@ -104,17 +110,26 @@
       @confirm="markAll"
       @cancel="confirmMarkAll = false"
     />
+
+    <!-- Sign out confirmation -->
+    <ConfirmDialog
+      v-if="confirmLogout"
+      message="Sign out of Rhesus?"
+      @confirm="logout"
+      @cancel="confirmLogout = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, ChevronUp, Maximize2, Minimize2 } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, ChevronUp, Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
 import { useArticlesStore } from '@/stores/articles'
 import { useSettingsStore } from '@/stores/settings'
+import { useAuthStore } from '@/stores/auth'
 import FeedTree from '@/components/feeds/FeedTree.vue'
 import FeedEditor from '@/components/feeds/FeedEditor.vue'
 import ArticleList from '@/components/articles/ArticleList.vue'
@@ -138,7 +153,10 @@ const { selection, tree } = storeToRefs(feedsStore)
 
 const unreadCount = computed(() => articles.value.filter((a) => a.unread).length)
 
+const authStore = useAuthStore()
+
 const confirmMarkAll = ref(false)
+const confirmLogout = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
 const copyToast = ref<string | null>(null)
@@ -147,8 +165,29 @@ const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
 const suppressNextSidebarCollapse = ref(true)
 
 const readerScrollEl = ref<HTMLElement | null>(null)
+const readerOverlayEl = ref<HTMLElement | null>(null)
 const readerScrollProgress = ref(0)
 const showScrollTop = ref(false)
+
+let readerTouchY = 0
+
+function onReaderTouchStart(e: TouchEvent) {
+  readerTouchY = e.touches[0]!.clientY
+}
+
+function onReaderTouchMove(e: TouchEvent) {
+  const scrollEl = readerScrollEl.value
+  if (!scrollEl || !scrollEl.contains(e.target as Node)) {
+    e.preventDefault()
+    return
+  }
+  const dy = e.touches[0]!.clientY - readerTouchY
+  const atTop = scrollEl.scrollTop <= 0
+  const atBottom = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 1
+  if ((dy > 0 && atTop) || (dy < 0 && atBottom) || (atTop && atBottom)) {
+    e.preventDefault()
+  }
+}
 
 function onReaderScroll() {
   const el = readerScrollEl.value
@@ -202,6 +241,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('popstate', onPopState)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   if (pollTimer !== null) clearInterval(pollTimer)
+  document.body.style.overflow = ''
 })
 
 function findTitle(items: ApiFeedTreeItem[], id: number, isCategory: boolean): string | null {
@@ -246,6 +286,12 @@ watch(
   },
 )
 
+// Lock document scroll while an overlay panel is open so the article list
+// behind it cannot scroll through touch inertia or mis-fires.
+watch([showSettings, showFeedEditor, sidebarCollapsed], ([s, f, collapsed]) => {
+  document.body.style.overflow = (s || f || !collapsed) ? 'hidden' : ''
+})
+
 // Periodic polling: restart the timer whenever the interval setting changes.
 let pollTimer: ReturnType<typeof setInterval> | null = null
 watch(
@@ -271,6 +317,13 @@ watch(selectedId, (newId, oldId) => {
   if (newId !== null && oldId === null) {
     history.pushState({ articleOverlay: true }, '')
     historyPushed.value = true
+    window.scrollTo({ top: window.scrollY, behavior: 'instant' })
+    nextTick().then(() => {
+      const el = readerOverlayEl.value
+      if (!el) return
+      el.addEventListener('touchstart', onReaderTouchStart, { passive: true })
+      el.addEventListener('touchmove', onReaderTouchMove, { passive: false })
+    })
   }
 })
 
@@ -288,8 +341,13 @@ function closeReader() {
   }
 }
 
+const effectiveTheme = computed(() => {
+  if (settings.value.theme !== 'system') return settings.value.theme
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+})
+
 const themeLabel = computed(() =>
-  settings.value.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
+  effectiveTheme.value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
 )
 
 function toggleSidebar() {
@@ -297,13 +355,19 @@ function toggleSidebar() {
 }
 
 function toggleTheme() {
-  settings.value.theme = settings.value.theme === 'dark' ? 'light' : 'dark'
+  settings.value.theme = effectiveTheme.value === 'dark' ? 'light' : 'dark'
 }
 
 async function markAll() {
   confirmMarkAll.value = false
   const sel = feedsStore.selection
   if (sel) await articlesStore.markAllRead()
+}
+
+async function logout() {
+  confirmLogout.value = false
+  await authStore.logout()
+  router.push('/login')
 }
 
 function toggleSettings() {
@@ -314,6 +378,7 @@ function toggleSettings() {
 function toggleFeedEditor() {
   showSettings.value = false
   showFeedEditor.value = !showFeedEditor.value
+  if (showFeedEditor.value) settings.value.sidebar_collapsed = true
 }
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
@@ -572,6 +637,11 @@ async function refresh() {
   white-space: nowrap;
 }
 
+.sidebar-manage {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border);
+}
+
 .sidebar-footer {
   flex-shrink: 0;
   border-top: 1px solid var(--color-border);
@@ -599,6 +669,15 @@ async function refresh() {
   color: var(--color-accent);
 }
 
+.sidebar-footer-btn--signout {
+  color: var(--color-danger);
+}
+
+.sidebar-footer-btn--signout:hover {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
 .main-content {
   margin-top: var(--topbar-height);
   margin-left: var(--sidebar-width);
@@ -619,6 +698,7 @@ async function refresh() {
   z-index: 10;
   background: var(--color-surface);
   overflow-y: auto;
+  overscroll-behavior: contain;
   transition: left var(--transition-normal);
 }
 
@@ -687,6 +767,7 @@ async function refresh() {
   overflow-y: auto;
   height: 100%;
   padding: 24px var(--reader-h-pad);
+  overscroll-behavior: contain;
 }
 
 .reader-title {

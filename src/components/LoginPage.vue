@@ -19,8 +19,9 @@
             autocomplete="current-password"
             required
           />
-          <button type="button" class="pw-toggle" @click="showPassword = !showPassword">
-            {{ showPassword ? 'Hide' : 'Show' }}
+          <button type="button" class="pw-toggle" :title="showPassword ? 'Hide password' : 'Show password'" @click="showPassword = !showPassword">
+            <EyeOff v-if="showPassword" :size="16" />
+            <Eye v-else :size="16" />
           </button>
         </div>
       </label>
@@ -33,13 +34,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
 
 const port = window.location.port ? `:${window.location.port}` : ''
-const apiUrl = ref(`${window.location.protocol}//localhost${port}/tt-rss/api/`)
+const apiUrl = ref(`${window.location.protocol}//${window.location.hostname}${port}/tt-rss/api/`)
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
@@ -67,6 +69,7 @@ async function submit() {
   align-items: center;
   justify-content: center;
   height: 100%;
+  padding-top: var(--topbar-height);
   background: var(--color-bg);
 }
 
@@ -117,13 +120,15 @@ input:focus {
 
 .password-wrap input {
   flex: 1;
-  padding-right: 52px;
+  padding-right: 36px;
 }
 
 .pw-toggle {
   position: absolute;
   right: 8px;
-  font-size: var(--font-size-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--color-text-muted);
   padding: 2px 4px;
   border-radius: 3px;

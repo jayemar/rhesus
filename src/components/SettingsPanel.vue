@@ -21,6 +21,7 @@
         <label class="select-row">
           <span>Theme</span>
           <select v-model="s.theme">
+            <option value="system">System</option>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
@@ -37,10 +38,10 @@
           <span>Font</span>
           <select v-model="s.font_family">
             <option value="system">System UI</option>
-            <option value="helvetica">Helvetica</option>
-            <option value="georgia">Georgia</option>
-            <option value="verdana">Verdana</option>
-            <option value="palatino">Palatino</option>
+            <option value="inter">Inter</option>
+            <option value="nunito">Nunito</option>
+            <option value="merriweather">Merriweather</option>
+            <option value="lora">Lora</option>
           </select>
         </label>
         <label class="select-row">
@@ -106,38 +107,26 @@
       </a>
     </section>
 
-    <section class="logout-section">
-      <button class="logout-btn" @click="logout">Sign out of Rhesus</button>
-    </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
 import { ExternalLink } from 'lucide-vue-next'
 import { useSettingsStore } from '@/stores/settings'
-import { useAuthStore } from '@/stores/auth'
 
 const settingsStore = useSettingsStore()
 const { settings: s } = storeToRefs(settingsStore)
-const authStore = useAuthStore()
-const router = useRouter()
 
 const ttrssUrl = `${window.location.protocol}//${window.location.hostname}:8280/tt-rss/prefs.php`
-
-async function logout() {
-  await authStore.logout()
-  router.push('/login')
-}
 </script>
 
 <style scoped>
 .settings-panel {
-  width: 100%;
-  height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--color-bg);
 }
 
@@ -250,23 +239,5 @@ input[type='number'] {
   text-decoration: underline;
 }
 
-.logout-section {
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid var(--color-border);
-}
 
-.logout-btn {
-  padding: 8px 20px;
-  border: 1px solid var(--color-danger);
-  border-radius: 4px;
-  color: var(--color-danger);
-  font-size: var(--font-size-base);
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.logout-btn:hover {
-  background: var(--color-danger);
-  color: #fff;
-}
 </style>

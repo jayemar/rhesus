@@ -93,7 +93,7 @@ export interface ApiArticle {
 }
 
 export interface UiSettings {
-  theme: 'dark' | 'light'
+  theme: 'dark' | 'light' | 'system'
   sort_order: 'newest' | 'oldest'
   sidebar_collapsed: boolean
   show_thumbnails: boolean
@@ -104,7 +104,7 @@ export interface UiSettings {
   swipe_left_action: 'none' | 'toggle_read' | 'toggle_starred'
   long_press_title: 'none' | 'copy_text' | 'copy_link' | 'copy_markdown'
   font_size: number
-  font_family: 'system' | 'helvetica' | 'georgia' | 'verdana' | 'palatino'
+  font_family: 'system' | 'inter' | 'nunito' | 'merriweather' | 'lora'
   date_sort: 'retrieval' | 'publication'
   load_on_startup: boolean
   poll_interval: number

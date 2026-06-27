@@ -166,7 +166,26 @@
         :style="morePopupStyle"
         @click.stop
       >
+        <button
+          class="share-option share-option--font"
+          :style="{ fontFamily: currentFont.fontFamily }"
+          @click="openMoreFontDropdown"
+        >
+          Font: {{ currentFont.label }}
+          <ChevronRight :size="13" class="share-option-chevron" />
+        </button>
         <button class="share-option" @click="promptUnsubscribe">Unsubscribe from feed</button>
+      </div>
+      <div v-if="moreFontOpen" class="font-backdrop" @click="moreFontOpen = false" />
+      <div v-if="moreFontOpen" class="font-dropdown" :style="moreFontDropdownStyle" @click.stop>
+        <button
+          v-for="opt in fontOptions"
+          :key="opt.value"
+          class="font-option"
+          :class="{ active: settingsStore.settings.font_family === opt.value }"
+          :style="{ fontFamily: opt.fontFamily }"
+          @click="selectReaderFont(opt.value)"
+        >{{ opt.label }}</button>
       </div>
       <ConfirmDialog
         v-if="feedToUnsubscribe"
@@ -182,9 +201,11 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { Readability } from '@mozilla/readability'
-import { Mail, MailOpen, Star, Tag, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight } from 'lucide-vue-next'
+import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
+import { useSettingsStore } from '@/stores/settings'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
 import { deleteFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
@@ -195,6 +216,39 @@ const props = defineProps<{ article: ApiArticle }>()
 const emit = defineEmits<{ close: [], copied: [label: string] }>()
 const articlesStore = useArticlesStore()
 const feedsStore = useFeedsStore()
+const settingsStore = useSettingsStore()
+
+const fontOptions = [
+  { value: 'system', label: 'System UI', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  { value: 'inter', label: 'Inter', fontFamily: "'Inter', sans-serif" },
+  { value: 'nunito', label: 'Nunito', fontFamily: "'Nunito', sans-serif" },
+  { value: 'merriweather', label: 'Merriweather', fontFamily: "'Merriweather', serif" },
+  { value: 'lora', label: 'Lora', fontFamily: "'Lora', serif" },
+]
+
+const moreFontOpen = ref(false)
+const moreFontDropdownStyle = ref<Record<string, string>>({})
+
+const currentFont = computed(() =>
+  fontOptions.find(o => o.value === settingsStore.settings.font_family) ?? fontOptions[0]!
+)
+
+function openMoreFontDropdown() {
+  showMoreMenu.value = false
+  if (moreBtn.value) {
+    const rect = moreBtn.value.getBoundingClientRect()
+    const w = 180
+    let left = rect.left + rect.width / 2 - w / 2
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8))
+    moreFontDropdownStyle.value = { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${w}px` }
+  }
+  moreFontOpen.value = true
+}
+
+function selectReaderFont(value: string) {
+  settingsStore.settings.font_family = value as typeof settingsStore.settings.font_family
+  moreFontOpen.value = false
+}
 
 const lightboxSrc = ref<string | null>(null)
 const lightboxAlt = ref('')
@@ -679,6 +733,34 @@ async function toggleFullContent() {
     const base = doc.createElement('base')
     base.setAttribute('href', result.url)
     doc.head.appendChild(base)
+    // Remove site-specific UI control elements hidden by the original page's CSS/JS
+    doc.querySelectorAll('b[class], span[class]').forEach(el => el.remove())
+
+    // Normalize image+caption div pairs to semantic <figure>/<figcaption> so
+    // that sites like NPR (which don't use <figure>) get caption styling.
+    doc.querySelectorAll('img:not(figure img)').forEach(img => {
+      const picture = img.closest('picture')
+      const imageNode = picture ?? img
+      const imageWrapper = imageNode.parentElement
+      if (!imageWrapper) return
+      const captionSibling = imageWrapper.nextElementSibling
+      if (!captionSibling) return
+      const captionEl = captionSibling.querySelector('[class*="caption"] p, [aria-label*="caption"] p')
+      if (!captionEl) return
+      const text = captionEl.textContent?.trim()
+      if (!text) return
+      const grandParent = imageWrapper.parentElement
+      if (!grandParent) return
+      const figure = doc.createElement('figure')
+      const figcaption = doc.createElement('figcaption')
+      figcaption.textContent = text
+      figure.appendChild(imageNode.cloneNode(true))
+      figure.appendChild(figcaption)
+      grandParent.insertBefore(figure, imageWrapper)
+      imageWrapper.remove()
+      captionSibling.remove()
+    })
+
     const article = new Readability(doc).parse()
     fullContent.value = article?.content ?? result.content
   } catch {
@@ -716,13 +798,14 @@ async function copy(type: 'title' | 'link' | 'markdown') {
   }
 }
 
-// Takes the first URL from a srcset string, handling URLs that contain internal
+// Takes the first URL from a srcset string. Handles both ", " (comma+space) and
+// ",\n" (comma+newline) entry separators, while preserving URLs that contain internal
 // commas (e.g. Cloudinary transformation URLs like w_700,h_700,c_fit/...).
-// Standard srcset separates entries with ", " (comma+space), so splitting on
-// that preserves comma-only URLs while still splitting real multi-entry srcsets.
+// The lookahead requires whitespace then a non-whitespace char after the comma, which
+// matches real entry boundaries but not internal commas (no whitespace follows them).
 function firstSrcsetUrl(srcset: string): string | null {
   if (!srcset) return null
-  const first = srcset.split(', ')[0]?.trim()
+  const first = srcset.split(/,(?=\s+\S)/)[0]?.trim()
   if (!first) return null
   return first.replace(/\s+\d+(\.\d+)?[wx]$/, '').trim() || null
 }
@@ -1195,6 +1278,17 @@ const imageAttachments = computed(() => {
   background: var(--color-surface);
 }
 
+:global(.share-option--font) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+:global(.share-option-chevron) {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
 :global(.share-backdrop) {
   position: fixed;
   inset: 0;
@@ -1344,5 +1438,41 @@ const imageAttachments = computed(() => {
 <style>
 [data-theme='dark'] .reader-note-save {
   color: #1a1a1a;
+}
+
+.font-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+.font-dropdown {
+  position: fixed;
+  z-index: 200;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.font-option {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+}
+
+.font-option:hover,
+.font-option.active {
+  background: var(--color-surface);
+}
+
+.font-option.active {
+  color: var(--color-accent);
 }
 </style>

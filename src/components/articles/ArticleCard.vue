@@ -377,6 +377,12 @@ function onCardClick() {
   color: var(--color-text-muted);
 }
 
+img.feed-icon {
+  background: #fff;
+  padding: 1px;
+  border-radius: 3px;
+}
+
 .card-body {
   flex: 1;
   min-width: 0;

@@ -209,6 +209,7 @@ function selectFeed(item: ApiFeedTreeItem) {
 <style scoped>
 .feed-tree {
   overflow-y: auto;
+  overscroll-behavior: contain;
   height: 100%;
   padding: 8px 0;
 }

@@ -1,5 +1,9 @@
 import './styles/variables.css'
 import './styles/base.css'
+import '@fontsource/inter'
+import '@fontsource/nunito'
+import '@fontsource/merriweather'
+import '@fontsource/lora'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

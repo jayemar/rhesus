@@ -73,6 +73,12 @@ const iconUrl = computed(() => {
   object-fit: contain;
 }
 
+img.feed-icon {
+  background: #fff;
+  padding: 1px;
+  border-radius: 3px;
+}
+
 .feed-icon--placeholder {
   color: var(--color-text-muted);
 }

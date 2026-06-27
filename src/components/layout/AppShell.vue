@@ -323,11 +323,13 @@ watch(selectedId, (newId, oldId) => {
 })
 
 function onPopState() {
+  showScrollTop.value = false
   historyPushed.value = false
   articlesStore.select(null)
 }
 
 function closeReader() {
+  showScrollTop.value = false
   if (historyPushed.value) {
     historyPushed.value = false
     history.back()

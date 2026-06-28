@@ -25,6 +25,7 @@ export interface SubscribeResult {
   code: number
   feed_id?: number
   message?: string
+  feeds?: Record<string, string>
 }
 
 export async function addFeed(feedUrl: string, categoryId: number): Promise<SubscribeResult> {

@@ -20,39 +20,72 @@
       <section class="add-section">
         <h3>Add feed</h3>
         <div class="add-row">
-          <input
-            v-model="newFeedUrl"
-            class="add-input"
-            type="text"
-            placeholder="example.com/feed.xml"
-            autocomplete="off"
-            autocapitalize="off"
-            :disabled="adding"
-            @keydown.enter.prevent="submitAddFeed"
-          />
+          <div class="add-input-wrap">
+            <input
+              v-model="newFeedUrl"
+              class="add-input"
+              type="text"
+              placeholder="https://example.com/feed.xml"
+              autocomplete="off"
+              autocapitalize="off"
+              :disabled="adding"
+              @keydown.enter.prevent="submitAddFeed"
+            />
+            <button
+              v-if="newFeedUrl"
+              class="add-clear-btn"
+              type="button"
+              title="Clear"
+              :disabled="adding"
+              @click="newFeedUrl = ''; feedChoices = null; addError = null; addSuccess = null"
+            ><X :size="12" /></button>
+          </div>
           <select v-model.number="newFeedCatId" class="add-select" :disabled="adding">
             <option :value="0">Uncategorized</option>
             <option v-for="cat in userCategories" :key="cat.id" :value="cat.id">{{ cat.title }}</option>
           </select>
           <button class="add-btn" :disabled="!newFeedUrl.trim() || adding" @click="submitAddFeed">
-            <Plus :size="14" />
+            <Loader2 v-if="adding" :size="14" class="spinning" />
+            <Plus v-else :size="14" />
           </button>
         </div>
+        <p v-if="addSuccess" class="add-success">{{ addSuccess }}</p>
         <p v-if="addError" class="add-error">{{ addError }}</p>
+        <div v-if="feedChoices" class="feed-choices">
+          <p class="feed-choices-label">Multiple feeds found - select one:</p>
+          <button
+            v-for="(title, url) in feedChoices"
+            :key="url"
+            class="feed-choice-btn"
+            :disabled="adding"
+            @click="selectFeedChoice(url)"
+          >
+            <span class="feed-choice-title">{{ title || url }}</span>
+            <span v-if="title" class="feed-choice-url">{{ url }}</span>
+          </button>
+        </div>
       </section>
 
       <section class="list-section">
         <div class="list-header">
           <h3>Feeds{{ feeds.length ? ` (${filteredFeeds.length})` : '' }}</h3>
-          <input
-            v-if="feeds.length"
-            v-model="searchQuery"
-            class="search-input"
-            type="search"
-            placeholder="Search feeds..."
-            autocomplete="off"
-            autocapitalize="off"
-          />
+          <div v-if="feeds.length" class="search-input-wrap">
+            <input
+              v-model="searchQuery"
+              class="search-input"
+              type="text"
+              placeholder="Search feeds..."
+              autocomplete="off"
+              autocapitalize="off"
+            />
+            <button
+              v-if="searchQuery"
+              class="add-clear-btn"
+              type="button"
+              title="Clear"
+              @click="searchQuery = ''"
+            ><X :size="12" /></button>
+          </div>
           <button class="refresh-btn" :disabled="loading" title="Refresh" @click="load">
             <RefreshCw :size="13" :class="{ spinning: loading }" />
           </button>
@@ -128,8 +161,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink } from 'lucide-vue-next'
+import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink, X, Loader2 } from 'lucide-vue-next'
 import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl } from '@/api/feeds'
+import { ApiError } from '@/api/client'
 import { useFeedsStore } from '@/stores/feeds'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiFeed, ApiCategory } from '@/types/api'
@@ -150,6 +184,8 @@ const newFeedUrl = ref('')
 const newFeedCatId = ref(0)
 const adding = ref(false)
 const addError = ref<string | null>(null)
+const addSuccess = ref<string | null>(null)
+const feedChoices = ref<Record<string, string> | null>(null)
 
 const feedToDelete = ref<ApiFeed | null>(null)
 const expandedErrorId = ref<number | null>(null)
@@ -176,7 +212,7 @@ const catMap = computed(() => {
 const filteredFeeds = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (!q) return feeds.value
-  return feeds.value.filter((f) => f.title.toLowerCase().includes(q))
+  return feeds.value.filter((f) => f.title.toLowerCase().includes(q) || f.feed_url.toLowerCase().includes(q))
 })
 
 interface CatGroup { id: number; title: string; feeds: ApiFeed[] }
@@ -254,36 +290,76 @@ async function doDelete() {
   feedsStore.loadTree()
 }
 
+async function subscribeToUrl(feedUrl: string) {
+  adding.value = true
+  addError.value = null
+  addSuccess.value = null
+  feedChoices.value = null
+  try {
+    const result = await addFeed(feedUrl, newFeedCatId.value)
+    if (result.code === 0) {
+      addError.value = 'Already subscribed to that feed.'
+    } else if (result.code === 1) {
+      newFeedUrl.value = ''
+      addSuccess.value = `Feed added successfully: ${feedUrl}`
+      setTimeout(() => { addSuccess.value = null }, 4000)
+      await load()
+      feedsStore.loadTree()
+    } else if (result.code === 2) {
+      addError.value = result.message ? `Invalid URL: ${result.message}` : 'Invalid URL.'
+    } else if (result.code === 3) {
+      addError.value = 'No feed found at that URL.'
+    } else if (result.code === 4) {
+      feedChoices.value = result.feeds ?? null
+      if (!feedChoices.value) addError.value = 'Multiple feeds found - please use a direct feed URL.'
+    } else if (result.code === 5) {
+      addError.value = result.message ? `Could not fetch feed: ${result.message}` : 'Could not fetch feed.'
+    } else if (result.code === 6) {
+      addError.value = result.message ? `Feed could not be parsed: ${result.message}` : 'Feed content could not be parsed.'
+    } else {
+      addError.value = result.message ? `Error (code ${result.code}): ${result.message}` : `Error (code ${result.code}).`
+    }
+  } finally {
+    adding.value = false
+  }
+}
+
+async function selectFeedChoice(url: string) {
+  await subscribeToUrl(url)
+}
+
 async function submitAddFeed() {
   const raw = newFeedUrl.value.trim()
   if (!raw || adding.value) return
   const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
   adding.value = true
   addError.value = null
+  feedChoices.value = null
   try {
     const resolved = await resolveSubscribeUrl(url)
-    const result = await addFeed(resolved.url, newFeedCatId.value)
-    if (result.code === 0) {
-      addError.value = 'Already subscribed to that feed.'
-    } else if (result.code === 1) {
-      newFeedUrl.value = ''
-      await load()
-      feedsStore.loadTree()
-    } else if (result.code === 2) {
-      addError.value = 'Invalid URL.'
-    } else if (result.code === 3) {
-      addError.value = 'No feed found at that URL.'
-    } else if (result.code === 4) {
-      addError.value = 'Multiple feeds found - please use a direct feed URL.'
-    } else if (result.code === 5) {
-      addError.value = result.message ? `Could not fetch feed: ${result.message}` : 'Could not fetch feed.'
-    } else if (result.code === 6) {
-      addError.value = 'Feed content could not be parsed.'
+    const resolvedNote = resolved.url !== url ? ` (tried: ${resolved.url})` : ''
+    await subscribeToUrl(resolved.url)
+    if (addError.value && resolvedNote) addError.value = addError.value + resolvedNote
+  } catch (e) {
+    if (e instanceof ApiError) {
+      const messages: Record<string, string> = {
+        'UNKNOWN_FEED':       'No feed found at that URL.',
+        'INVALID_URL':        'Invalid URL (must be http/https on a standard port, and not a private address).',
+        'MISSING_URL':        'No URL provided.',
+        'NOT_LOGGED_IN':      'Not logged in - please refresh and try again.',
+        'API_DISABLED':       'API access is not enabled for this account.',
+        'LOGIN_ERROR':        'Authentication failed.',
+        'INCORRECT_USAGE':    'Unexpected error - this may be a bug in Rhesus.',
+        'UNKNOWN_METHOD':     'Server configuration error: feed resolution unavailable (rhesus_settings plugin may not be active).',
+        'E_OPERATION_FAILED': 'Operation failed on the server.',
+        'E_NOT_FOUND':        'Resource not found.',
+        'HTTP_ERROR':         'Network error contacting the server.',
+      }
+      const friendly = messages[e.code]
+      addError.value = friendly ?? `Failed to add feed: ${e.code}`
     } else {
-      addError.value = `Error (code ${result.code}).`
+      addError.value = e instanceof Error ? `Failed to add feed: ${e.message}` : 'Failed to add feed.'
     }
-  } catch {
-    addError.value = 'Failed to add feed.'
   } finally {
     adding.value = false
   }
@@ -400,10 +476,17 @@ h3 {
   align-items: center;
 }
 
-.add-input {
+.add-input-wrap {
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.add-input {
+  width: 100%;
+  padding: 7px 28px 7px 10px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -414,6 +497,22 @@ h3 {
 
 .add-input:focus {
   border-color: var(--color-accent);
+}
+
+.add-clear-btn {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  padding: 2px;
+  border-radius: 2px;
+  transition: color var(--transition-fast);
+}
+
+.add-clear-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
 }
 
 .add-select {
@@ -445,10 +544,62 @@ h3 {
   cursor: default;
 }
 
+.add-success {
+  margin-top: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+}
+
 .add-error {
   margin-top: 8px;
   font-size: var(--font-size-sm);
   color: var(--color-danger);
+}
+
+.feed-choices {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.feed-choices-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.feed-choice-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  text-align: left;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.feed-choice-btn:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+  border-color: var(--color-accent);
+}
+
+.feed-choice-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.feed-choice-title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.feed-choice-url {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--color-text-muted);
+  word-break: break-all;
 }
 
 /* Feed list */
@@ -468,10 +619,17 @@ h3 {
   white-space: nowrap;
 }
 
-.search-input {
+.search-input-wrap {
   flex: 1;
   min-width: 0;
-  padding: 5px 8px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  width: 100%;
+  padding: 5px 26px 5px 8px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 4px;

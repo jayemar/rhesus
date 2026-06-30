@@ -138,7 +138,7 @@ h2 {
   padding: 7px 14px;
   border-radius: 4px;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }

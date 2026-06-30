@@ -59,7 +59,7 @@ p {
   padding: 8px 16px;
   border-radius: 4px;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   font-weight: 600;
 }
 

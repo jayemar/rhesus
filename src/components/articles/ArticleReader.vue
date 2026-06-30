@@ -1499,7 +1499,7 @@ const imageAttachments = computed(() => {
 
 .reader-note-save {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .reader-note-save:disabled {

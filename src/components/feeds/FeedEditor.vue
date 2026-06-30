@@ -104,6 +104,33 @@
               class="feed-row"
               :class="{ editing: editingId === feed.id }"
             >
+              <div class="feed-title-col">
+                <span class="feed-title" :title="feed.feed_url">{{ feed.title }}</span>
+                <span v-if="expandedErrorId === feed.id" class="feed-error-msg">{{ feed.last_error }}</span>
+              </div>
+              <button
+                v-if="feed.last_error && editingId !== feed.id"
+                class="feed-error-btn"
+                :class="{ active: expandedErrorId === feed.id }"
+                title="Show error"
+                @click="toggleError(feed.id)"
+              >!</button>
+              <div v-if="editingId !== feed.id" class="feed-actions">
+                <button
+                  class="action-btn"
+                  title="Refresh"
+                  :disabled="refreshingId === feed.id"
+                  @click="triggerRefresh(feed.id)"
+                >
+                  <RefreshCw :size="13" :class="{ spinning: refreshingId === feed.id }" />
+                </button>
+                <button class="action-btn" title="Edit" @click="startEdit(feed)">
+                  <Pencil :size="13" />
+                </button>
+                <button class="action-btn action-btn--danger" title="Delete" @click="confirmDelete(feed)">
+                  <Trash2 :size="13" />
+                </button>
+              </div>
               <template v-if="editingId === feed.id">
                 <div class="edit-form">
                   <input v-model="editTitle" class="edit-input" placeholder="Title" maxlength="250" />
@@ -121,27 +148,6 @@
                     <button class="edit-save" :disabled="saving" @click="saveEdit(feed)">Save</button>
                     <button class="edit-cancel" @click="cancelEdit">Cancel</button>
                   </div>
-                </div>
-              </template>
-              <template v-else>
-                <div class="feed-title-col">
-                  <span class="feed-title" :title="feed.feed_url">{{ feed.title }}</span>
-                  <span v-if="expandedErrorId === feed.id" class="feed-error-msg">{{ feed.last_error }}</span>
-                </div>
-                <button
-                  v-if="feed.last_error"
-                  class="feed-error-btn"
-                  :class="{ active: expandedErrorId === feed.id }"
-                  title="Show error"
-                  @click="toggleError(feed.id)"
-                >!</button>
-                <div class="feed-actions">
-                  <button class="action-btn" title="Edit" @click="startEdit(feed)">
-                    <Pencil :size="13" />
-                  </button>
-                  <button class="action-btn action-btn--danger" title="Delete" @click="confirmDelete(feed)">
-                    <Trash2 :size="13" />
-                  </button>
                 </div>
               </template>
             </div>
@@ -162,7 +168,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink, X, Loader2 } from 'lucide-vue-next'
-import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl } from '@/api/feeds'
+import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl, refreshFeed } from '@/api/feeds'
 import { ApiError } from '@/api/client'
 import { useFeedsStore } from '@/stores/feeds'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -189,6 +195,7 @@ const feedChoices = ref<Record<string, string> | null>(null)
 
 const feedToDelete = ref<ApiFeed | null>(null)
 const expandedErrorId = ref<number | null>(null)
+const refreshingId = ref<number | null>(null)
 
 const importStatus = ref<string | null>(null)
 const importStatusClass = ref('')
@@ -266,14 +273,29 @@ async function saveEdit(feed: ApiFeed) {
   try {
     const title = editTitle.value.trim() || feed.title
     const feed_url = editFeedUrl.value.trim() || feed.feed_url
+    const urlChanged = feed_url !== feed.feed_url
     await editFeed(feed.id, { title, feed_url, cat_id: editCatId.value })
     feed.title = title
     feed.feed_url = feed_url
     feed.cat_id = editCatId.value
     editingId.value = null
     feedsStore.loadTree()
+    if (urlChanged) {
+      await triggerRefresh(feed.id)
+    }
   } finally {
     saving.value = false
+  }
+}
+
+async function triggerRefresh(feedId: number) {
+  refreshingId.value = feedId
+  try {
+    await refreshFeed(feedId)
+    await load()
+    feedsStore.loadTree()
+  } finally {
+    refreshingId.value = null
   }
 }
 
@@ -534,7 +556,7 @@ h3 {
   justify-content: center;
   border-radius: 4px;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   flex-shrink: 0;
   transition: opacity var(--transition-fast);
 }
@@ -714,6 +736,16 @@ h3 {
 .feed-row.editing {
   flex-direction: column;
   align-items: stretch;
+  padding: 0;
+  background: var(--color-surface);
+}
+
+.feed-row.editing .feed-title-col {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.feed-row.editing .edit-form {
   padding: 12px;
 }
 
@@ -863,7 +895,7 @@ h3 {
 
 .edit-save {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .edit-save:disabled {

@@ -47,3 +47,7 @@ export async function importOpml(content: string): Promise<void> {
 export async function resolveSubscribeUrl(url: string): Promise<{ url: string; discovered: boolean }> {
   return call<{ url: string; discovered: boolean }>('resolveSubscribeUrl', { url })
 }
+
+export async function refreshFeed(feedId: number): Promise<void> {
+  await call('updateFeed', { feed_id: feedId })
+}

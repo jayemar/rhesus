@@ -17,6 +17,11 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("getUiSettings", $this);
         $host->add_api_method("setUiSettings", $this);
         $host->add_api_method("createLabel", $this);
+        $host->add_api_method("deleteLabel", $this);
+        $host->add_api_method("getFilters", $this);
+        $host->add_api_method("saveFilter", $this);
+        $host->add_api_method("deleteFilter", $this);
+        $host->add_api_method("setFilterEnabled", $this);
         $host->add_api_method("editFeed", $this);
         $host->add_api_method("importOpml", $this);
         $host->add_api_method("fetchFullContent", $this);
@@ -107,6 +112,157 @@ class Rhesus_Settings extends Plugin {
         Labels::create($caption, '', '', $uid);
         $new_id = Labels::find_id($caption, $uid);
         return [0, ["id" => $new_id, "caption" => $caption, "created" => true]];
+    }
+
+    // Deletes a label and all its article associations.
+    // Called via: POST /tt-rss/api/ {"op":"deleteLabel","sid":"...","label_id":N}
+    public function deleteLabel(): array {
+        $label_id = (int)($_REQUEST['label_id'] ?? 0);
+        if (!$label_id) {
+            return [1, ["error" => "MISSING_LABEL_ID"]];
+        }
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $pdo = Db::pdo();
+        $sth = $pdo->prepare("SELECT id FROM ttrss_labels2 WHERE id = ? AND owner_uid = ?");
+        $sth->execute([$label_id, $uid]);
+        if (!$sth->fetch()) {
+            return [1, ["error" => "LABEL_NOT_FOUND"]];
+        }
+        $pdo->prepare("DELETE FROM ttrss_user_labels2 WHERE label_id = ?")->execute([$label_id]);
+        $pdo->prepare("DELETE FROM ttrss_labels2 WHERE id = ? AND owner_uid = ?")->execute([$label_id, $uid]);
+        return [0, ["deleted" => true]];
+    }
+
+    // Returns all filters with their rules and actions for the current user.
+    public function getFilters(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) return [1, ["error" => "NOT_LOGGED_IN"]];
+        $pdo = Db::pdo();
+
+        $sth = $pdo->prepare("SELECT id, title, enabled, match_any_rule, inverse, last_triggered FROM ttrss_filters2 WHERE owner_uid = ? ORDER BY order_id, id");
+        $sth->execute([$uid]);
+        $filters = $sth->fetchAll(PDO::FETCH_ASSOC);
+
+        $out = [];
+        foreach ($filters as $f) {
+            $rsth = $pdo->prepare("SELECT id, reg_exp, filter_type, inverse, feed_id, cat_id, cat_filter FROM ttrss_filters2_rules WHERE filter_id = ?");
+            $rsth->execute([$f['id']]);
+            $rules = $rsth->fetchAll(PDO::FETCH_ASSOC);
+
+            $asth = $pdo->prepare("SELECT id, action_id, action_param FROM ttrss_filters2_actions WHERE filter_id = ?");
+            $asth->execute([$f['id']]);
+            $actions = $asth->fetchAll(PDO::FETCH_ASSOC);
+
+            $out[] = [
+                "id"            => (int)$f['id'],
+                "title"         => (string)$f['title'],
+                "enabled"       => (bool)$f['enabled'],
+                "match_any_rule"=> (bool)$f['match_any_rule'],
+                "inverse"       => (bool)$f['inverse'],
+                "last_triggered"=> $f['last_triggered'],
+                "rules"         => array_map(fn($r) => [
+                    "id"          => (int)$r['id'],
+                    "reg_exp"     => (string)$r['reg_exp'],
+                    "filter_type" => (int)$r['filter_type'],
+                    "inverse"     => (bool)$r['inverse'],
+                    "feed_id"     => $r['feed_id'] !== null ? (int)$r['feed_id'] : null,
+                    "cat_id"      => $r['cat_id'] !== null ? (int)$r['cat_id'] : null,
+                    "cat_filter"  => (bool)$r['cat_filter'],
+                ], $rules),
+                "actions" => array_map(fn($a) => [
+                    "id"           => (int)$a['id'],
+                    "action_id"    => (int)$a['action_id'],
+                    "action_param" => (string)$a['action_param'],
+                ], $actions),
+            ];
+        }
+        return [0, ["filters" => $out]];
+    }
+
+    // Creates or updates a filter with its rules and actions.
+    // Called via: POST /tt-rss/api/ {"op":"saveFilter","sid":"...","title":"...","enabled":true,...,"rules":"[...]","actions":"[...]"}
+    public function saveFilter(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) return [1, ["error" => "NOT_LOGGED_IN"]];
+        $pdo = Db::pdo();
+
+        $id            = isset($_REQUEST['id']) && $_REQUEST['id'] !== '' ? (int)$_REQUEST['id'] : null;
+        $title         = trim($_REQUEST['title'] ?? '');
+        $enabled       = filter_var($_REQUEST['enabled'] ?? true, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
+        $match_any     = filter_var($_REQUEST['match_any_rule'] ?? true, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
+        $inverse       = filter_var($_REQUEST['inverse'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
+        $rules_raw     = $_REQUEST['rules'] ?? '[]';
+        $actions_raw   = $_REQUEST['actions'] ?? '[]';
+
+        $rules   = json_decode($rules_raw, true);
+        $actions = json_decode($actions_raw, true);
+        if (!is_array($rules) || !is_array($actions)) return [1, ["error" => "INVALID_DATA"]];
+
+        if ($id !== null) {
+            $sth = $pdo->prepare("SELECT id FROM ttrss_filters2 WHERE id = ? AND owner_uid = ?");
+            $sth->execute([$id, $uid]);
+            if (!$sth->fetch()) return [1, ["error" => "FILTER_NOT_FOUND"]];
+            $pdo->prepare("UPDATE ttrss_filters2 SET title=?, enabled=?, match_any_rule=?, inverse=? WHERE id=?")->execute([$title, $enabled, $match_any, $inverse, $id]);
+            $pdo->prepare("DELETE FROM ttrss_filters2_rules WHERE filter_id=?")->execute([$id]);
+            $pdo->prepare("DELETE FROM ttrss_filters2_actions WHERE filter_id=?")->execute([$id]);
+        } else {
+            $sth = $pdo->prepare("INSERT INTO ttrss_filters2 (owner_uid, title, enabled, match_any_rule, inverse) VALUES (?,?,?,?,?) RETURNING id");
+            $sth->execute([$uid, $title, $enabled, $match_any, $inverse]);
+            $id = (int)$sth->fetchColumn();
+        }
+
+        foreach ($rules as $r) {
+            $pdo->prepare("INSERT INTO ttrss_filters2_rules (filter_id, reg_exp, filter_type, inverse, feed_id, cat_id, cat_filter) VALUES (?,?,?,?,?,?,?)")->execute([
+                $id,
+                (string)($r['reg_exp'] ?? ''),
+                (int)($r['filter_type'] ?? 1),
+                ($r['inverse'] ?? false) ? 'true' : 'false',
+                isset($r['feed_id']) && $r['feed_id'] !== null && !($r['cat_filter'] ?? false) ? (int)$r['feed_id'] : null,
+                isset($r['cat_id']) && $r['cat_id'] !== null && ($r['cat_filter'] ?? false) ? (int)$r['cat_id'] : null,
+                ($r['cat_filter'] ?? false) ? 'true' : 'false',
+            ]);
+        }
+        foreach ($actions as $a) {
+            $pdo->prepare("INSERT INTO ttrss_filters2_actions (filter_id, action_id, action_param) VALUES (?,?,?)")->execute([
+                $id,
+                (int)($a['action_id'] ?? 2),
+                (string)($a['action_param'] ?? ''),
+            ]);
+        }
+
+        return [0, ["id" => $id]];
+    }
+
+    // Deletes a filter and its rules/actions (via cascade).
+    public function deleteFilter(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) return [1, ["error" => "NOT_LOGGED_IN"]];
+        $id = (int)($_REQUEST['id'] ?? 0);
+        if (!$id) return [1, ["error" => "MISSING_ID"]];
+        $pdo = Db::pdo();
+        $sth = $pdo->prepare("SELECT id FROM ttrss_filters2 WHERE id = ? AND owner_uid = ?");
+        $sth->execute([$id, $uid]);
+        if (!$sth->fetch()) return [1, ["error" => "FILTER_NOT_FOUND"]];
+        $pdo->prepare("DELETE FROM ttrss_filters2 WHERE id = ? AND owner_uid = ?")->execute([$id, $uid]);
+        return [0, ["deleted" => true]];
+    }
+
+    // Enables or disables a filter.
+    public function setFilterEnabled(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) return [1, ["error" => "NOT_LOGGED_IN"]];
+        $id      = (int)($_REQUEST['id'] ?? 0);
+        $enabled = filter_var($_REQUEST['enabled'] ?? true, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
+        if (!$id) return [1, ["error" => "MISSING_ID"]];
+        $pdo = Db::pdo();
+        $sth = $pdo->prepare("SELECT id FROM ttrss_filters2 WHERE id = ? AND owner_uid = ?");
+        $sth->execute([$id, $uid]);
+        if (!$sth->fetch()) return [1, ["error" => "FILTER_NOT_FOUND"]];
+        $pdo->prepare("UPDATE ttrss_filters2 SET enabled = ? WHERE id = ?")->execute([$enabled, $id]);
+        return [0, ["ok" => true]];
     }
 
     // Updates a feed's title and/or category.

@@ -27,12 +27,17 @@ if (empty($session_data['uid'])) {
     exit;
 }
 
-// Start a fresh cookie-based session and copy the session data into it
+// Discard any existing session cookie so session_start() creates a
+// brand-new session rather than resuming the browser's previous one
+// (which may belong to a different user, e.g. from logging in on a
+// different port).
+unset($_COOKIE[session_name()]);
 ini_set('session.use_cookies', '1');
 session_start();
 foreach ($session_data as $key => $value) {
     $_SESSION[$key] = $value;
 }
+session_write_close();
 
 header('Location: /tt-rss/prefs.php');
 exit;

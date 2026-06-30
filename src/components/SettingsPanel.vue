@@ -102,6 +102,10 @@
 
     <section class="links-section">
       <h3>TT-RSS</h3>
+      <div class="select-row account-row">
+        <span>Logged in as</span>
+        <span class="account-name">{{ username || '...' }}</span>
+      </div>
       <a :href="ttrssUrl" target="_blank" rel="noopener noreferrer" class="ttrss-link">
         Open TT-RSS settings <ExternalLink :size="13" class="ttrss-link-icon" />
       </a>
@@ -112,19 +116,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ExternalLink } from 'lucide-vue-next'
 import { useSettingsStore } from '@/stores/settings'
+import { getSid } from '@/api/client'
 
 const settingsStore = useSettingsStore()
-const { settings: s } = storeToRefs(settingsStore)
+const { settings: s, username } = storeToRefs(settingsStore)
 
-const ttrssUrl = `${window.location.protocol}//${window.location.hostname}:8280/tt-rss/prefs.php`
+const ttrssUrl = computed(() => {
+  const sid = getSid()
+  return sid
+    ? `/tt-rss/plugins.local/rhesus_settings/redirect.php?sid=${sid}`
+    : '/tt-rss/prefs.php'
+})
 </script>
 
 <style scoped>
 .settings-panel {
+  height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--color-bg);
@@ -237,6 +248,15 @@ input[type='number'] {
 
 .ttrss-link:hover {
   text-decoration: underline;
+}
+
+.account-row {
+  cursor: default;
+}
+
+.account-name {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 

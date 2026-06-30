@@ -11,6 +11,15 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 
+// Track current input type so hover styles don't stick after touch taps on
+// hybrid devices (touchscreen laptops, iPad + keyboard, etc.).
+;(function trackInputType() {
+  const el = document.documentElement
+  el.dataset.input = 'mouse'
+  document.addEventListener('touchstart', () => { el.dataset.input = 'touch' }, { passive: true })
+  document.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') el.dataset.input = 'mouse' })
+})()
+
 const app = createApp(App)
 
 app.use(createPinia())

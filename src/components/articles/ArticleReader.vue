@@ -236,7 +236,21 @@
           Font: {{ currentFont.label }}
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
+        <button class="share-option" @click="openMoreCatDropdown">
+          Category: {{ userCategories.find(c => c.id === currentCatId)?.title ?? 'Uncategorized' }}
+          <ChevronRight :size="13" class="share-option-chevron" />
+        </button>
         <button class="share-option" @click="promptUnsubscribe">Unsubscribe from feed</button>
+      </div>
+      <div v-if="moreCatOpen" class="font-backdrop" @click="moreCatOpen = false" />
+      <div v-if="moreCatOpen" class="font-dropdown" :style="moreCatDropdownStyle" @click.stop>
+        <button
+          v-for="cat in userCategories"
+          :key="cat.id"
+          class="font-option"
+          :class="{ active: cat.id === currentCatId }"
+          @click="selectCategory(cat.id)"
+        >{{ cat.title }}</button>
       </div>
       <div v-if="moreFontOpen" class="font-backdrop" @click="moreFontOpen = false" />
       <div v-if="moreFontOpen" class="font-dropdown" :style="moreFontDropdownStyle" @click.stop>
@@ -269,7 +283,7 @@ import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
 import { useSettingsStore } from '@/stores/settings'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
-import { deleteFeed } from '@/api/feeds'
+import { deleteFeed, editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
@@ -310,6 +324,54 @@ function openMoreFontDropdown() {
 function selectReaderFont(value: string) {
   settingsStore.settings.font_family = value as typeof settingsStore.settings.font_family
   moreFontOpen.value = false
+}
+
+const moreCatOpen = ref(false)
+const moreCatDropdownStyle = ref<Record<string, string>>({})
+
+const userCategories = computed(() => {
+  const cats: { id: number; title: string }[] = [{ id: 0, title: 'Uncategorized' }]
+  for (const item of feedsStore.tree) {
+    if (item.type === 'category' && item.bare_id > 0) {
+      cats.push({ id: item.bare_id, title: item.name })
+    }
+  }
+  return cats
+})
+
+function findFeedCatId(items: typeof feedsStore.tree, feedId: number): number | undefined {
+  for (const item of items) {
+    if (item.type === 'category' && item.bare_id >= 0) {
+      if (item.items?.some(f => f.bare_id === feedId)) return item.bare_id
+      if (item.items) {
+        const found = findFeedCatId(item.items, feedId)
+        if (found !== undefined) return found
+      }
+    }
+  }
+  return undefined
+}
+
+const currentCatId = computed(() =>
+  findFeedCatId(feedsStore.tree, props.article.feed_id) ?? 0
+)
+
+function openMoreCatDropdown() {
+  showMoreMenu.value = false
+  if (moreBtn.value) {
+    const rect = moreBtn.value.getBoundingClientRect()
+    const w = 200
+    let left = rect.left + rect.width / 2 - w / 2
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8))
+    moreCatDropdownStyle.value = { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${w}px` }
+  }
+  moreCatOpen.value = true
+}
+
+async function selectCategory(catId: number) {
+  moreCatOpen.value = false
+  await editFeed(props.article.feed_id, { cat_id: catId })
+  feedsStore.loadTree()
 }
 
 const lightboxSrc = ref<string | null>(null)

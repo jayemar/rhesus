@@ -2,7 +2,7 @@
   <div class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <!-- Top bar -->
     <header class="topbar">
-      <button class="icon-btn" title="Toggle sidebar" @click="toggleSidebar"><Menu :size="16" /></button>
+      <button class="icon-btn" title="Toggle sidebar" @pointerdown="onIconBtnPointerDown" @click="toggleSidebar"><Menu :size="16" /></button>
       <span class="topbar-title">
         {{ feedsStore.selection?.title ?? 'Rhesus' }}
         <span v-if="feedsStore.selection && unreadCount > 0" class="topbar-unread">({{ unreadCount }})</span>
@@ -11,19 +11,28 @@
         <button
           v-if="feedsStore.selection"
           class="icon-btn"
+          :class="{ active: showArticleSearch }"
+          title="Search articles"
+          @pointerdown="onIconBtnPointerDown"
+          @click="showArticleSearch = !showArticleSearch"
+        ><Search :size="16" /></button>
+        <button
+          v-if="feedsStore.selection"
+          class="icon-btn"
           title="Mark all as read"
+          @pointerdown="onIconBtnPointerDown"
           @click="confirmMarkAll = true"
         ><CheckCheck :size="16" /></button>
-        <button class="icon-btn" title="Refresh" @click="refresh"><RefreshCw :size="16" /></button>
-        <button class="icon-btn" :title="themeLabel" @click="toggleTheme">
+        <button class="icon-btn" title="Refresh" @pointerdown="onIconBtnPointerDown" @click="refresh"><RefreshCw :size="16" /></button>
+        <button class="icon-btn" :title="themeLabel" @pointerdown="onIconBtnPointerDown" @click="toggleTheme">
           <Sun v-if="effectiveTheme === 'dark'" :size="16" />
           <Moon v-else :size="16" />
         </button>
-        <button class="icon-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" @click="toggleFullscreen">
+        <button class="icon-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" @pointerdown="onIconBtnPointerDown" @click="toggleFullscreen">
           <Minimize2 v-if="isFullscreen" :size="16" />
           <Maximize2 v-else :size="16" />
         </button>
-        <button class="icon-btn" title="Settings" @click="toggleSettings"><Settings :size="16" /></button>
+        <button class="icon-btn" title="Settings" @pointerdown="onIconBtnPointerDown" @click="toggleSettings"><Settings :size="16" /></button>
       </div>
     </header>
 
@@ -58,8 +67,13 @@
 
     <!-- Main content -->
     <main class="main-content">
-      <ArticleList @copied="showCopyToast" />
-      <SettingsPanel v-if="showSettings" class="content-overlay" />
+      <ArticleList :show-search="showArticleSearch" @copied="showCopyToast" @close-search="showArticleSearch = false" />
+      <Transition name="overlay">
+        <div v-if="showSettings" class="settings-overlay" @keydown.esc="showSettings = false">
+          <button class="settings-close" title="Close" @click="showSettings = false"><X :size="14" /></button>
+          <SettingsPanel />
+        </div>
+      </Transition>
       <FeedEditor v-if="showFeedEditor" class="content-overlay" />
 
       <Transition name="overlay">
@@ -117,8 +131,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2 } from 'lucide-vue-next'
+import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
@@ -146,7 +160,29 @@ const { settings, loaded: settingsLoaded } = storeToRefs(settingsStore)
 const { articles, selectedId } = storeToRefs(articlesStore)
 const { selection, tree } = storeToRefs(feedsStore)
 
-const unreadCount = computed(() => articles.value.filter((a) => a.unread).length)
+function findInTree(items: typeof tree.value, bareId: number): (typeof tree.value)[0] | undefined {
+  for (const item of items) {
+    if (item.bare_id === bareId) return item
+    if (item.items) {
+      const found = findInTree(item.items, bareId)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
+const baseServerUnread = ref(0)
+
+watchEffect(() => {
+  const sel = selection.value
+  if (!sel) { baseServerUnread.value = 0; return }
+  const node = findInTree(tree.value, sel.id)
+  if (node) baseServerUnread.value = node.unread
+})
+
+const unreadCount = computed(() =>
+  Math.max(0, baseServerUnread.value - articlesStore.readCountDelta)
+)
 
 const authStore = useAuthStore()
 
@@ -154,6 +190,7 @@ const confirmMarkAll = ref(false)
 const confirmLogout = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
+const showArticleSearch = ref(false)
 const copyToast = ref<string | null>(null)
 const historyPushed = ref(false)
 const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
@@ -301,6 +338,7 @@ watch(
 )
 
 watch(selection, (newSel) => {
+  showArticleSearch.value = false
   if (suppressNextSidebarCollapse.value) {
     suppressNextSidebarCollapse.value = false
     return
@@ -502,6 +540,20 @@ function showCopyToast(label: string) {
 }
 
 
+function onIconBtnPointerDown(e: PointerEvent) {
+  const btn = e.currentTarget as HTMLElement
+  btn.classList.add('pressed')
+  const cleanup = () => {
+    btn.classList.remove('pressed')
+    btn.removeEventListener('pointerup', cleanup)
+    btn.removeEventListener('pointercancel', cleanup)
+    btn.removeEventListener('pointerleave', cleanup)
+  }
+  btn.addEventListener('pointerup', cleanup)
+  btn.addEventListener('pointercancel', cleanup)
+  btn.addEventListener('pointerleave', cleanup)
+}
+
 async function refresh() {
   const sel = feedsStore.selection
   if (sel) await articlesStore.load(sel.id, sel.isCategory, sel.viewMode)
@@ -563,10 +615,11 @@ async function refresh() {
   text-decoration: none;
 }
 
-.icon-btn:hover {
+.icon-btn.pressed {
   background: var(--color-surface-raised);
   color: var(--color-text-primary);
 }
+
 
 .sidebar {
   position: fixed;
@@ -701,6 +754,38 @@ async function refresh() {
 
 .sidebar-collapsed .content-overlay {
   left: 0;
+}
+
+.settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.settings-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  z-index: 1;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-close:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 .reader-overlay {
@@ -875,5 +960,10 @@ async function refresh() {
 <style>
 [data-theme='light'] .reader-overlay-panel {
   background: var(--color-surface);
+}
+
+html[data-input='mouse'] .icon-btn:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 </style>

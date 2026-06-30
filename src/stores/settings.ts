@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, type UiSettings } from '@/types/api'
 
 export const useSettingsStore = defineStore('settings', () => {
   const settings = ref<UiSettings>({ ...DEFAULT_SETTINGS })
+  const username = ref<string>('')
   const loaded = ref(false)
 
   const FONT_FAMILY_MAP: Record<string, string> = {
@@ -17,7 +18,9 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function load() {
     try {
-      settings.value = { ...DEFAULT_SETTINGS, ...(await getUiSettings()) }
+      const res = await getUiSettings()
+      settings.value = { ...DEFAULT_SETTINGS, ...res.settings }
+      username.value = res.user_name
     } catch {
       settings.value = { ...DEFAULT_SETTINGS }
     }
@@ -74,5 +77,5 @@ export const useSettingsStore = defineStore('settings', () => {
     { deep: true },
   )
 
-  return { settings, loaded, load, save }
+  return { settings, username, loaded, load, save }
 })

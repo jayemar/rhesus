@@ -1,11 +1,28 @@
 <template>
   <div class="article-list" ref="listEl" :style="pullUpDist > 0 ? { transform: `translateY(${-(pullUpDist * 20).toFixed(1)}px)` } : {}">
+    <div v-if="props.showSearch && feedsStore.selection && !articlesStore.loading" class="search-bar">
+      <Search :size="13" class="search-icon" />
+      <input
+        ref="searchInputEl"
+        v-model="searchQuery"
+        class="search-input"
+        type="text"
+        placeholder="Search articles..."
+        autocomplete="off"
+        autocapitalize="off"
+        @keydown.esc="closeSearch"
+      />
+      <button class="search-clear" type="button" @click="closeSearch">
+        <X :size="12" />
+      </button>
+    </div>
     <div v-if="articlesStore.loading" class="state-msg">Loading...</div>
     <div v-else-if="!feedsStore.selection" class="state-msg">Select a feed to read</div>
     <div v-else-if="articles.length === 0" class="state-msg">No articles</div>
     <template v-else>
+      <div v-if="searchQuery && filteredArticles.length === 0" class="state-msg">No articles matching "{{ searchQuery }}"</div>
       <ArticleCard
-        v-for="article in articles"
+        v-for="article in filteredArticles"
         :key="article.id"
         :article="article"
         :is-selected="selectedId === article.id"
@@ -29,15 +46,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ChevronUp } from 'lucide-vue-next'
+import { ChevronUp, Search, X } from 'lucide-vue-next'
 import { useFeedsStore } from '@/stores/feeds'
 import { useArticlesStore } from '@/stores/articles'
 import { useSettingsStore } from '@/stores/settings'
 import ArticleCard from './ArticleCard.vue'
 
-const emit = defineEmits<{ copied: [label: string] }>()
+const props = defineProps<{ showSearch?: boolean }>()
+const emit = defineEmits<{ copied: [label: string], 'close-search': [] }>()
 
 const feedsStore = useFeedsStore()
 const articlesStore = useArticlesStore()
@@ -48,6 +66,28 @@ const { settings } = storeToRefs(settingsStore)
 
 const listEl = ref<HTMLElement | null>(null)
 const sentinelEl = ref<HTMLElement | null>(null)
+const searchInputEl = ref<HTMLInputElement | null>(null)
+const searchQuery = ref('')
+
+const filteredArticles = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return articles.value
+  return articles.value.filter((a) =>
+    a.title.toLowerCase().includes(q) || a.link.toLowerCase().includes(q)
+  )
+})
+
+watch(() => props.showSearch, (show) => {
+  if (!show) { searchQuery.value = ''; return }
+  nextTick(() => searchInputEl.value?.focus())
+})
+
+watch(() => feedsStore.selection, () => { searchQuery.value = '' })
+
+function closeSearch() {
+  searchQuery.value = ''
+  emit('close-search')
+}
 
 let observer: IntersectionObserver | null = null
 
@@ -109,7 +149,6 @@ function onScroll() {
     const id = parseInt((cardEl as HTMLElement).dataset['id']!, 10)
     const article = map.get(id)
     if (article?.unread && id !== selectedId.value) {
-      article.unread = false
       toMark.push(id)
     }
   }
@@ -199,6 +238,52 @@ function onTouchEnd() {
   min-height: calc(100dvh - var(--topbar-height));
   background: var(--color-bg);
   transition: transform 0.15s ease-out;
+}
+
+.search-bar {
+  position: sticky;
+  top: var(--topbar-height);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.search-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 2px;
+  transition: color var(--transition-fast);
+}
+
+.search-clear:hover {
+  color: var(--color-text-primary);
 }
 
 .state-msg {

@@ -12,6 +12,7 @@ export const useArticlesStore = defineStore('articles', () => {
   const hasMore = ref(true)
   const currentFeedId = ref<number | null>(null)
   const currentIsCategory = ref(false)
+  const readCountDelta = ref(0)
 
   const PAGE_SIZE = 200
   const currentViewMode = ref<string>('all_articles')
@@ -31,6 +32,7 @@ export const useArticlesStore = defineStore('articles', () => {
     selectedId.value = null
     loading.value = true
     hasMore.value = true
+    readCountDelta.value = 0
     articles.value = []
     try {
       const results = await getHeadlines({
@@ -91,7 +93,11 @@ export const useArticlesStore = defineStore('articles', () => {
 
   function markRead(id: number, read: boolean) {
     const article = articles.value.find((a) => a.id === id)
-    if (article) article.unread = !read
+    if (article) {
+      if (read && article.unread) readCountDelta.value++
+      else if (!read && !article.unread) readCountDelta.value--
+      article.unread = !read
+    }
     updateArticle([id], ArticleField.Unread, read ? ArticleMode.False : ArticleMode.True)
       .catch((err) => console.error('markRead failed', id, err))
   }
@@ -99,7 +105,10 @@ export const useArticlesStore = defineStore('articles', () => {
   function markReadBatch(ids: number[]) {
     for (const id of ids) {
       const article = articles.value.find((a) => a.id === id)
-      if (article) article.unread = false
+      if (article && article.unread) {
+        article.unread = false
+        readCountDelta.value++
+      }
     }
     updateArticle(ids, ArticleField.Unread, ArticleMode.False)
       .catch((err) => console.error('markReadBatch failed', ids, err))
@@ -126,6 +135,7 @@ export const useArticlesStore = defineStore('articles', () => {
   async function markAllRead() {
     const ids = articles.value.filter((a) => a.unread).map((a) => a.id)
     if (ids.length === 0) return
+    readCountDelta.value += ids.length
     articles.value.forEach((a) => { if (a.unread) a.unread = false })
     try {
       await updateArticle(ids, ArticleField.Unread, ArticleMode.False)
@@ -170,7 +180,7 @@ export const useArticlesStore = defineStore('articles', () => {
   }
 
   return {
-    articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder,
+    articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder, readCountDelta,
     load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, appendNew, select, setNote, setLabels,
   }
 })

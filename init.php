@@ -41,19 +41,24 @@ class Rhesus_Settings extends Plugin {
         $stored = $this->host->get($this, "settings", null);
 
         if ($stored === null) {
-            return [0, ["settings" => $this->default_settings()]];
+            $settings = $this->default_settings();
+        } else {
+            $decoded = json_decode($stored, true);
+            $settings = is_array($decoded)
+                ? array_merge($this->default_settings(), $decoded)
+                : $this->default_settings();
         }
 
-        $decoded = json_decode($stored, true);
-
-        if (!is_array($decoded)) {
-            return [0, ["settings" => $this->default_settings()]];
+        $uid = $_SESSION['uid'] ?? null;
+        $user_name = '';
+        if ($uid !== null) {
+            $sth = Db::pdo()->prepare("SELECT login FROM ttrss_users WHERE id = ?");
+            $sth->execute([$uid]);
+            $row = $sth->fetch();
+            $user_name = $row ? (string)$row['login'] : '';
         }
 
-        // Merge with defaults so new keys are always present
-        $settings = array_merge($this->default_settings(), $decoded);
-
-        return [0, ["settings" => $settings]];
+        return [0, ["settings" => $settings, "user_name" => $user_name]];
     }
 
     // Accepts a settings object and persists it.

@@ -101,6 +101,14 @@ export async function createLabel(
   return call('createLabel', { caption })
 }
 
+export async function deleteLabel(labelId: number): Promise<void> {
+  await call('deleteLabel', { label_id: labelId })
+}
+
+export async function getAllLabels(): Promise<ApiLabel[]> {
+  return call<ApiLabel[]>('getLabels')
+}
+
 export async function fetchFullContent(
   articleId: number,
 ): Promise<{ content: string; url: string }> {

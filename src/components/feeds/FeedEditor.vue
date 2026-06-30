@@ -1,7 +1,7 @@
 <template>
   <div class="feed-editor">
     <div class="feed-editor-inner">
-      <h2>Manage feeds</h2>
+      <h2>Feeds</h2>
 
       <section class="opml-section">
         <h3>OPML</h3>

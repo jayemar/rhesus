@@ -45,7 +45,7 @@
           <span class="brand-meta">v{{ appVersion }} &middot; {{ buildDate }}</span>
         </span>
       </a>
-      <FeedTree @navigate="settings.sidebar_collapsed = true; showFeedEditor = false" />
+      <FeedTree @navigate="settings.sidebar_collapsed = true; showFeedEditor = false; showFilterManager = false" />
       <div class="sidebar-manage">
         <button
           class="sidebar-footer-btn"
@@ -55,6 +55,15 @@
         >
           <Rss :size="14" />
           <span>Manage feeds</span>
+        </button>
+        <button
+          class="sidebar-footer-btn"
+          :class="{ active: showFilterManager }"
+          title="Manage filters"
+          @click="toggleFilterManager"
+        >
+          <Filter :size="14" />
+          <span>Manage filters</span>
         </button>
       </div>
       <div class="sidebar-footer">
@@ -74,7 +83,18 @@
           <SettingsPanel />
         </div>
       </Transition>
-      <FeedEditor v-if="showFeedEditor" class="content-overlay" />
+      <Transition name="overlay">
+        <div v-if="showFeedEditor" class="settings-overlay" @keydown.esc="showFeedEditor = false">
+          <button class="settings-close" title="Close" @click="showFeedEditor = false"><X :size="14" /></button>
+          <FeedEditor />
+        </div>
+      </Transition>
+      <Transition name="overlay">
+        <div v-if="showFilterManager" class="settings-overlay" @keydown.esc="showFilterManager = false">
+          <button class="settings-close" title="Close" @click="showFilterManager = false"><X :size="14" /></button>
+          <FilterManager />
+        </div>
+      </Transition>
 
       <Transition name="overlay">
         <div v-if="selectedArticle" ref="readerOverlayEl" class="reader-overlay" @keydown.esc="closeReader">
@@ -132,7 +152,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
@@ -141,6 +161,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import FeedTree from '@/components/feeds/FeedTree.vue'
 import FeedEditor from '@/components/feeds/FeedEditor.vue'
+import FilterManager from '@/components/filters/FilterManager.vue'
 import ArticleList from '@/components/articles/ArticleList.vue'
 import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
@@ -190,6 +211,7 @@ const confirmMarkAll = ref(false)
 const confirmLogout = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
+const showFilterManager = ref(false)
 const showArticleSearch = ref(false)
 const copyToast = ref<string | null>(null)
 const historyPushed = ref(false)
@@ -320,8 +342,8 @@ watch(
 
 // Lock document scroll while an overlay panel is open so the article list
 // behind it cannot scroll through touch inertia or mis-fires.
-watch([showSettings, showFeedEditor, sidebarCollapsed], ([s, f, collapsed]) => {
-  document.body.style.overflow = (s || f || !collapsed) ? 'hidden' : ''
+watch([showSettings, showFeedEditor, showFilterManager, sidebarCollapsed], ([s, f, fm, collapsed]) => {
+  document.body.style.overflow = (s || f || fm || !collapsed) ? 'hidden' : ''
 })
 
 // Periodic polling: restart the timer whenever the interval setting changes.
@@ -412,8 +434,16 @@ function toggleSettings() {
 
 function toggleFeedEditor() {
   showSettings.value = false
+  showFilterManager.value = false
   showFeedEditor.value = !showFeedEditor.value
   if (showFeedEditor.value) settings.value.sidebar_collapsed = true
+}
+
+function toggleFilterManager() {
+  showSettings.value = false
+  showFeedEditor.value = false
+  showFilterManager.value = !showFilterManager.value
+  if (showFilterManager.value) settings.value.sidebar_collapsed = true
 }
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null

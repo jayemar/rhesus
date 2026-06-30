@@ -110,6 +110,33 @@ export interface UiSettings {
   poll_interval: number
 }
 
+export interface ApiFilterRule {
+  id?: number
+  reg_exp: string
+  filter_type: number
+  inverse: boolean
+  feed_id?: number | null
+  cat_id?: number | null
+  cat_filter: boolean
+}
+
+export interface ApiFilterAction {
+  id?: number
+  action_id: number
+  action_param: string
+}
+
+export interface ApiFilter {
+  id: number
+  title: string
+  enabled: boolean
+  match_any_rule: boolean
+  inverse: boolean
+  last_triggered?: string | null
+  rules: ApiFilterRule[]
+  actions: ApiFilterAction[]
+}
+
 export const DEFAULT_SETTINGS: UiSettings = {
   theme: 'dark',
   sort_order: 'newest',

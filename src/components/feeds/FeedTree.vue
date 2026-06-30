@@ -62,7 +62,9 @@
             :key="feed.id"
             :item="feed"
             :selected="isFeedSelected(feed)"
+            :deletable="item.bare_id === -2"
             @select="selectFeed(feed)"
+            @long-press="labelToDelete = feed"
           />
         </div>
       </template>
@@ -75,6 +77,13 @@
       </template>
     </template>
   </nav>
+
+  <ConfirmDialog
+    v-if="labelToDelete"
+    :message="`Delete label '${labelToDelete.name}'? This cannot be undone.`"
+    @confirm="confirmDeleteLabel"
+    @cancel="labelToDelete = null"
+  />
 </template>
 
 <script setup lang="ts">
@@ -84,6 +93,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useFeedsStore } from '@/stores/feeds'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import FeedItem from './FeedItem.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { deleteLabel } from '@/api/articles'
 import type { ApiFeedTreeItem } from '@/types/api'
 
 type SentinelItem =
@@ -98,6 +109,19 @@ const feedsStore = useFeedsStore()
 const { tree } = storeToRefs(feedsStore)
 
 const openCats = ref<Set<number>>(new Set())
+const labelToDelete = ref<ApiFeedTreeItem | null>(null)
+
+// TT-RSS label feed_id = -1024 - label_db_id, so label_db_id = -(bare_id + 1024)
+function labelDbId(bareId: number): number {
+  return -(bareId + 1024)
+}
+
+async function confirmDeleteLabel() {
+  if (!labelToDelete.value) return
+  await deleteLabel(labelDbId(labelToDelete.value.bare_id))
+  labelToDelete.value = null
+  await feedsStore.loadTree()
+}
 
 function insertAfter(
   items: ApiFeedTreeItem[],

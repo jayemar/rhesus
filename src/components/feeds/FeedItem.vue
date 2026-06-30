@@ -3,6 +3,10 @@
     class="feed-item"
     :class="{ selected, unread: item.unread > 0 }"
     @click="$emit('select')"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="cancelLongPress"
+    @pointercancel="cancelLongPress"
   >
     <img
       v-if="iconUrl"
@@ -25,11 +29,38 @@ import type { ApiFeedTreeItem } from '@/types/api'
 const props = defineProps<{
   item: ApiFeedTreeItem
   selected: boolean
+  deletable?: boolean
 }>()
 
-defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: []; 'long-press': [] }>()
 
 const iconFailed = ref(false)
+
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let startX = 0
+let startY = 0
+
+function onPointerDown(e: PointerEvent) {
+  if (!props.deletable || e.pointerType === 'mouse') return
+  startX = e.clientX
+  startY = e.clientY
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null
+    emit('long-press')
+  }, 600)
+}
+
+function onPointerMove(e: PointerEvent) {
+  if (longPressTimer === null) return
+  if (Math.abs(e.clientX - startX) > 6 || Math.abs(e.clientY - startY) > 6) cancelLongPress()
+}
+
+function cancelLongPress() {
+  if (longPressTimer !== null) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
 
 const iconUrl = computed(() => {
   if (iconFailed.value || !props.item.icon) return null

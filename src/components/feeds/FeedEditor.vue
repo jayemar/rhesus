@@ -86,6 +86,15 @@
               @click="searchQuery = ''"
             ><X :size="12" /></button>
           </div>
+          <button
+            v-if="feeds.length"
+            class="refresh-btn"
+            :class="{ active: errorsOnly }"
+            title="Show feeds with errors only"
+            @click="errorsOnly = !errorsOnly"
+          >
+            <AlertCircle :size="13" />
+          </button>
           <button class="refresh-btn" :disabled="loading" title="Refresh" @click="load">
             <RefreshCw :size="13" :class="{ spinning: loading }" />
           </button>
@@ -93,11 +102,18 @@
 
         <div v-if="loading && !feeds.length" class="list-empty">Loading...</div>
         <div v-else-if="!feeds.length" class="list-empty">No feeds subscribed yet.</div>
-        <div v-else-if="!filteredFeeds.length" class="list-empty">No feeds matching "{{ searchQuery }}".</div>
+        <div v-else-if="!filteredFeeds.length" class="list-empty">
+          {{ errorsOnly && !searchQuery ? 'No feeds with errors.' : `No feeds matching "${searchQuery}".` }}
+        </div>
 
         <div v-else class="feed-list">
           <template v-for="cat in groupedFeeds" :key="cat.id">
-            <div class="cat-header">{{ cat.title }}</div>
+            <div class="cat-header" @click="toggleCat(cat.id)">
+              <ChevronDown v-if="!collapsedCats[cat.id]" :size="12" class="cat-chevron" />
+              <ChevronRight v-else :size="12" class="cat-chevron" />
+              {{ cat.title }}
+            </div>
+            <template v-if="!collapsedCats[cat.id]">
             <div
               v-for="feed in cat.feeds"
               :key="feed.id"
@@ -151,6 +167,7 @@
                 </div>
               </template>
             </div>
+            </template>
           </template>
         </div>
       </section>
@@ -167,7 +184,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink, X, Loader2 } from 'lucide-vue-next'
+import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink, X, Loader2, ChevronDown, ChevronRight, AlertCircle } from 'lucide-vue-next'
 import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl, refreshFeed } from '@/api/feeds'
 import { ApiError } from '@/api/client'
 import { useFeedsStore } from '@/stores/feeds'
@@ -196,10 +213,12 @@ const feedChoices = ref<Record<string, string> | null>(null)
 const feedToDelete = ref<ApiFeed | null>(null)
 const expandedErrorId = ref<number | null>(null)
 const refreshingId = ref<number | null>(null)
+const collapsedCats = ref<Record<number, boolean>>({})
 
 const importStatus = ref<string | null>(null)
 const importStatusClass = ref('')
 const searchQuery = ref('')
+const errorsOnly = ref(false)
 
 const opmlExportUrl = '/tt-rss/backend.php?op=opml&method=export'
 
@@ -217,9 +236,11 @@ const catMap = computed(() => {
 })
 
 const filteredFeeds = computed(() => {
+  let result = feeds.value
+  if (errorsOnly.value) result = result.filter((f) => f.last_error)
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return feeds.value
-  return feeds.value.filter((f) => f.title.toLowerCase().includes(q) || f.feed_url.toLowerCase().includes(q))
+  if (q) result = result.filter((f) => f.title.toLowerCase().includes(q) || f.feed_url.toLowerCase().includes(q))
+  return result
 })
 
 interface CatGroup { id: number; title: string; feeds: ApiFeed[] }
@@ -252,6 +273,10 @@ async function load() {
 }
 
 onMounted(load)
+
+function toggleCat(catId: number) {
+  collapsedCats.value[catId] = !collapsedCats.value[catId]
+}
 
 function toggleError(feedId: number) {
   expandedErrorId.value = expandedErrorId.value === feedId ? null : feedId
@@ -292,6 +317,7 @@ async function triggerRefresh(feedId: number) {
   refreshingId.value = feedId
   try {
     await refreshFeed(feedId)
+    await editFeed(feedId, { update_interval: 0 })
     await load()
     feedsStore.loadTree()
   } finally {
@@ -419,7 +445,6 @@ async function onImportFile(e: Event) {
 
 .feed-editor-inner {
   padding: 24px;
-  max-width: 680px;
 }
 
 h2 {
@@ -509,7 +534,7 @@ h3 {
 .add-input {
   width: 100%;
   padding: 7px 28px 7px 10px;
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: var(--font-size-sm);
@@ -539,7 +564,7 @@ h3 {
 
 .add-select {
   padding: 7px 8px;
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: var(--font-size-sm);
@@ -652,7 +677,7 @@ h3 {
 .search-input {
   width: 100%;
   padding: 5px 26px 5px 8px;
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 4px;
   font-size: var(--font-size-sm);
@@ -678,6 +703,10 @@ h3 {
 .refresh-btn:hover:not(:disabled) {
   background: var(--color-surface-raised);
   color: var(--color-text-primary);
+}
+
+.refresh-btn.active {
+  color: var(--color-accent);
 }
 
 .refresh-btn:disabled {
@@ -711,9 +740,19 @@ h3 {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-  background: var(--color-surface);
+  color: var(--color-text-primary);
+  background: var(--color-surface-raised);
   border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cat-chevron {
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .cat-header:not(:first-child) {

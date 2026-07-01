@@ -1163,6 +1163,10 @@ const imageAttachments = computed(() => {
   margin-top: 6px;
 }
 
+.reader-content :deep(*) {
+  position: static !important;
+}
+
 .reader-content :deep(img) {
   max-width: 100%;
   height: auto;

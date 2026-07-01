@@ -35,7 +35,7 @@ export async function addFeed(feedUrl: string, categoryId: number): Promise<Subs
 
 export async function editFeed(
   feedId: number,
-  params: { title?: string; feed_url?: string; cat_id?: number },
+  params: { title?: string; feed_url?: string; cat_id?: number; update_interval?: number },
 ): Promise<void> {
   await call('editFeed', { feed_id: feedId, ...params })
 }

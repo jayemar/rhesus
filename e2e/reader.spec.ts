@@ -101,6 +101,26 @@ test('label icon remains active after article is closed and reopened', async ({ 
   }
 })
 
+test('clicking feed name in reader byline navigates to that feed and closes the reader', async ({ page }) => {
+  await page.locator('.card').first().click()
+  await expect(page.locator('.reader-overlay')).toBeVisible({ timeout: 10000 })
+
+  const feedNameEl = page.locator('.reader-meta-feed')
+  await expect(feedNameEl).toBeVisible()
+  const feedName = await feedNameEl.innerText()
+  await feedNameEl.click()
+
+  await expect(page.locator('.reader-overlay')).not.toBeVisible({ timeout: 5000 })
+  await expect(page).toHaveURL(/#\/feed\/-?\d+/)
+  await expect(page.locator('.topbar-title')).toContainText(feedName)
+  await expect(page.locator('.article-list')).toBeVisible({ timeout: 10000 })
+
+  // Back button should not reopen the just-closed reader
+  await page.goBack()
+  await page.waitForTimeout(500)
+  await expect(page.locator('.reader-overlay')).not.toBeVisible()
+})
+
 test('note editor save button has dark text in dark mode', async ({ page }) => {
   await page.evaluate(() => {
     document.documentElement.setAttribute('data-theme', 'dark')

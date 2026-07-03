@@ -15,7 +15,7 @@
         title="Toggle star"
         @click.stop="articlesStore.toggleStar(article.id)"
       ><Star :size="16" /></button>
-      <button ref="tagBtn" class="tb-btn" :class="{ active: articleHasLabels }" title="Labels" @click.stop="openTagMenu">
+      <button class="tb-btn" :class="{ active: articleHasLabels }" title="Labels" @click.stop="openTagMenu">
         <Tag :size="16" />
       </button>
       <button
@@ -30,7 +30,7 @@
         title="Search in article"
         @click.stop="toggleSearch"
       ><Search :size="16" /></button>
-      <button ref="shareBtn" class="tb-btn" title="Share" @click.stop="openShareMenu">
+      <button class="tb-btn" title="Share" @click.stop="openShareMenu">
         <Share2 :size="16" />
       </button>
       <button
@@ -40,7 +40,7 @@
         :title="fullContent !== null ? 'Show feed content' : 'Fetch full article'"
         @click.stop="toggleFullContent"
       ><Newspaper :size="16" /></button>
-      <button ref="moreBtn" class="tb-btn" title="More options" @click.stop="openMoreMenu">
+      <button class="tb-btn" title="More options" @click.stop="openMoreMenu">
         <MoreVertical :size="16" />
       </button>
     </footer>
@@ -62,7 +62,6 @@
             @click.stop="articlesStore.toggleStar(article.id)"
           ><Star :size="16" /></button>
           <button
-            :ref="(el) => { if (el) tagBtn = el as HTMLButtonElement }"
             class="tb-btn"
             :class="{ active: articleHasLabels }"
             title="Labels"
@@ -81,7 +80,6 @@
             @click.stop="toggleSearch"
           ><Search :size="16" /></button>
           <button
-            :ref="(el) => { if (el) shareBtn = el as HTMLButtonElement }"
             class="tb-btn"
             title="Share"
             @click.stop="openShareMenu"
@@ -94,7 +92,6 @@
             @click.stop="toggleFullContent"
           ><Newspaper :size="16" /></button>
           <button
-            :ref="(el) => { if (el) moreBtn = el as HTMLButtonElement }"
             class="tb-btn"
             title="More options"
             @click.stop="openMoreMenu"
@@ -302,6 +299,21 @@ const fontOptions = [
   { value: 'lora', label: 'Lora', fontFamily: "'Lora', serif" },
 ]
 
+// Anchors a fixed-position popup next to the button that opened it, flipping
+// to open upward when the button sits in the lower half of the viewport (e.g.
+// the floating toolbar near the bottom of the screen) so the popup doesn't
+// run off-screen.
+function anchorPopupStyle(rect: DOMRect, width: number): Record<string, string> {
+  let left = rect.left + rect.width / 2 - width / 2
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
+  const spaceBelow = window.innerHeight - rect.bottom
+  const spaceAbove = rect.top
+  if (spaceBelow < spaceAbove) {
+    return { bottom: `${window.innerHeight - rect.top + 8}px`, left: `${left}px`, width: `${width}px` }
+  }
+  return { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${width}px` }
+}
+
 const moreFontOpen = ref(false)
 const moreFontDropdownStyle = ref<Record<string, string>>({})
 
@@ -312,11 +324,7 @@ const currentFont = computed(() =>
 function openMoreFontDropdown() {
   showMoreMenu.value = false
   if (moreBtn.value) {
-    const rect = moreBtn.value.getBoundingClientRect()
-    const w = 180
-    let left = rect.left + rect.width / 2 - w / 2
-    left = Math.max(8, Math.min(left, window.innerWidth - w - 8))
-    moreFontDropdownStyle.value = { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${w}px` }
+    moreFontDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 180)
   }
   moreFontOpen.value = true
 }
@@ -359,11 +367,7 @@ const currentCatId = computed(() =>
 function openMoreCatDropdown() {
   showMoreMenu.value = false
   if (moreBtn.value) {
-    const rect = moreBtn.value.getBoundingClientRect()
-    const w = 200
-    let left = rect.left + rect.width / 2 - w / 2
-    left = Math.max(8, Math.min(left, window.innerWidth - w - 8))
-    moreCatDropdownStyle.value = { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${w}px` }
+    moreCatDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 200)
   }
   moreCatOpen.value = true
 }
@@ -719,22 +723,15 @@ const articleHasLabels = computed(() => {
   return (props.article.labels?.length ?? 0) > 0
 })
 
-async function openTagMenu() {
+async function openTagMenu(event: MouseEvent) {
   showShareMenu.value = false
   if (showTagMenu.value) {
     showTagMenu.value = false
     return
   }
+  tagBtn.value = event.currentTarget as HTMLElement
   if (tagBtn.value) {
-    const rect = tagBtn.value.getBoundingClientRect()
-    const popupWidth = 220
-    let left = rect.left + rect.width / 2 - popupWidth / 2
-    left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
-    tagPopupStyle.value = {
-      top: `${rect.bottom + 8}px`,
-      left: `${left}px`,
-      width: `${popupWidth}px`,
-    }
+    tagPopupStyle.value = anchorPopupStyle(tagBtn.value.getBoundingClientRect(), 220)
   }
   showTagMenu.value = true
   loadingLabels.value = true
@@ -787,31 +784,21 @@ async function toggleLabel(label: ApiLabel) {
   }
 }
 
-function openShareMenu() {
+function openShareMenu(event: MouseEvent) {
   showTagMenu.value = false
+  shareBtn.value = event.currentTarget as HTMLElement
   if (shareBtn.value) {
-    const rect = shareBtn.value.getBoundingClientRect()
-    const popupWidth = 200
-    let left = rect.left + rect.width / 2 - popupWidth / 2
-    left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
-    sharePopupStyle.value = {
-      top: `${rect.bottom + 8}px`,
-      left: `${left}px`,
-      width: `${popupWidth}px`,
-    }
+    sharePopupStyle.value = anchorPopupStyle(shareBtn.value.getBoundingClientRect(), 200)
   }
   showShareMenu.value = !showShareMenu.value
 }
 
-function openMoreMenu() {
+function openMoreMenu(event: MouseEvent) {
   showShareMenu.value = false
   if (showMoreMenu.value) { showMoreMenu.value = false; return }
+  moreBtn.value = event.currentTarget as HTMLElement
   if (moreBtn.value) {
-    const rect = moreBtn.value.getBoundingClientRect()
-    const popupWidth = 200
-    let left = rect.left + rect.width / 2 - popupWidth / 2
-    left = Math.max(8, Math.min(left, window.innerWidth - popupWidth - 8))
-    morePopupStyle.value = { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${popupWidth}px` }
+    morePopupStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 200)
   }
   showMoreMenu.value = true
 }
@@ -939,6 +926,17 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim()
 }
 
+// Detect small icon/share-button images by declared size: both width and height
+// present and <= 50px. Some themes/plugins (e.g. "Social Media Feather") inject
+// share-button icons directly into post content, which would otherwise be picked
+// as the hero image ahead of any real content photo. Images with no declared
+// dimensions are treated as real content, since they can't be judged this way.
+function isIconSizedImage(img: HTMLImageElement): boolean {
+  const width = parseInt(img.getAttribute('width') ?? '', 10)
+  const height = parseInt(img.getAttribute('height') ?? '', 10)
+  return Number.isFinite(width) && Number.isFinite(height) && width <= 50 && height <= 50
+}
+
 // Use the browser's own DOMParser to find the first content image and extract it
 // as a hero, removing it from the body to avoid showing it twice. The content URL
 // is used rather than flavor_image because TT-RSS rewrites content URLs to its
@@ -948,32 +946,37 @@ function stripHtml(html: string): string {
 function parseHero(content: string): { src: string | null; alt: string; caption: string; bodyHtml: string } {
   const parser = new DOMParser()
   const doc = parser.parseFromString(content, 'text/html')
-  const img = doc.querySelector('img')
-  if (!img) return { src: null, alt: '', caption: '', bodyHtml: doc.body.innerHTML }
 
-  const dcText = stripHtml(img.getAttribute('data-caption') ?? '')
-  const alt = img.getAttribute('alt') ?? ''
-  let src: string | null = null
+  for (const img of doc.querySelectorAll('img')) {
+    if (isIconSizedImage(img)) continue
 
-  // Prefer <source data-srcset|srcset> from a parent <picture>: lazy-loaded images
-  // often have a broken or stub src while the real URL lives in data-srcset.
-  const picture = img.closest('picture')
-  if (picture) {
-    const source = picture.querySelector('source[data-srcset], source[srcset]')
-    if (source) {
-      const raw = source.getAttribute('data-srcset') ?? source.getAttribute('srcset') ?? ''
-      src = firstSrcsetUrl(raw)
+    const dcText = stripHtml(img.getAttribute('data-caption') ?? '')
+    const alt = img.getAttribute('alt') ?? ''
+    let src: string | null = null
+
+    // Prefer <source data-srcset|srcset> from a parent <picture>: lazy-loaded images
+    // often have a broken or stub src while the real URL lives in data-srcset.
+    const picture = img.closest('picture')
+    if (picture) {
+      const source = picture.querySelector('source[data-srcset], source[srcset]')
+      if (source) {
+        const raw = source.getAttribute('data-srcset') ?? source.getAttribute('srcset') ?? ''
+        src = firstSrcsetUrl(raw)
+      }
     }
+
+    if (!src) src = img.getAttribute('data-src') ?? img.getAttribute('src') ?? null
+    if (!src || src.startsWith('data:') || src === 'undefined' || src === 'null') continue
+    if (/\/tracking[/.]|[-_]pixel\./i.test(src)) continue
+
+    const container = img.closest('figure') ?? picture ?? img
+    const caption = stripHtml(container.querySelector('figcaption')?.textContent?.trim() ?? '') || dcText
+    container.remove()
+
+    return { src, alt, caption, bodyHtml: doc.body.innerHTML }
   }
 
-  if (!src) src = img.getAttribute('data-src') ?? img.getAttribute('src') ?? null
-  if (!src || src.startsWith('data:')) return { src: null, alt: '', caption: '', bodyHtml: doc.body.innerHTML }
-
-  const container = img.closest('figure') ?? picture ?? img
-  const caption = stripHtml(container.querySelector('figcaption')?.textContent?.trim() ?? '') || dcText
-  container.remove()
-
-  return { src, alt, caption, bodyHtml: doc.body.innerHTML }
+  return { src: null, alt: '', caption: '', bodyHtml: doc.body.innerHTML }
 }
 
 // Strip any origin from TT-RSS-internal URLs so they resolve as relative paths
@@ -990,9 +993,16 @@ const parsedHero = computed(() => {
   return parseHero(content)
 })
 
+function isUsableImageUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  if (/\/tracking[/.]|[-_]pixel\./i.test(url)) return false
+  if (/\/undefined(?:[?#/]|$)/.test(url)) return false
+  return true
+}
+
 const heroUrl = computed(() => {
   const fi = props.article.flavor_image ? toRelativeUrl(props.article.flavor_image) : null
-  return parsedHero.value?.src ?? fi
+  return parsedHero.value?.src ?? (isUsableImageUrl(fi) ? fi : null)
 })
 
 const heroAlt = computed(() => parsedHero.value?.alt ?? '')
@@ -1002,10 +1012,36 @@ const heroCaption = computed(() => {
   return parsedHero.value?.caption ?? ''
 })
 
+function resolveRelativeUrls(doc: Document, baseUrl: string | undefined): void {
+  if (!baseUrl) return
+  let base: URL
+  try { base = new URL(baseUrl) } catch { return }
+  // normalizedContent() deliberately strips our own TT-RSS server's origin from
+  // /tt-rss/-rooted URLs (image cache paths, etc.) so they resolve relative to
+  // whatever host the SPA is served from. Those must not be re-absolutized
+  // against the article's own site here, or they'd point at the wrong origin.
+  doc.querySelectorAll('img[src]').forEach(el => {
+    const src = el.getAttribute('src')
+    if (src && !src.startsWith('http') && !src.startsWith('//') && !src.startsWith('data:') && !src.startsWith('/tt-rss/'))
+      try { el.setAttribute('src', new URL(src, base).href) } catch {}
+  })
+  doc.querySelectorAll('a[href]').forEach(el => {
+    const href = el.getAttribute('href')
+    if (href && !href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('/tt-rss/'))
+      try { el.setAttribute('href', new URL(href, base).href) } catch {}
+  })
+}
+
 function processContent(html: string): string {
   // Preprocess before DOMPurify strips data-* attributes: move data-caption
   // into alt (for lightbox) and figcaption (for below-image display) when empty.
   const pre = new DOMParser().parseFromString(html, 'text/html')
+  pre.querySelectorAll('img[src]').forEach(el => {
+    const src = el.getAttribute('src') ?? ''
+    if (src === 'undefined' || src === '' || src === 'null' || /\/tracking[/.]|[-_]pixel\./i.test(src))
+      el.remove()
+  })
+  resolveRelativeUrls(pre, props.article.link ?? undefined)
   pre.querySelectorAll('img[data-caption]').forEach(img => {
     const dc = img.getAttribute('data-caption') ?? ''
     const dcText = stripHtml(dc)

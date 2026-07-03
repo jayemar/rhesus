@@ -40,6 +40,24 @@ async function createFilter(
   await page.locator('.btn-save').click()
 }
 
+// Filter titles are not unique in TT-RSS, so match on the exact row text to avoid
+// ambiguous locators when multiple filters share a title prefix (e.g. an "edited"
+// variant of a title created earlier in the same test).
+function filterRowByTitle(page: import('@playwright/test').Page, title: string) {
+  const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: new RegExp(`^${escaped}$`) }) })
+}
+
+// CRUD tests run against a real, persistent account rather than a fresh database,
+// so any filter they create must be deleted again or it pollutes subsequent runs.
+async function deleteFilterByTitle(page: import('@playwright/test').Page, title: string) {
+  const row = filterRowByTitle(page, title)
+  await row.locator('[title="Delete"]').click()
+  await expect(page.locator('.dialog')).toBeVisible({ timeout: 3000 })
+  await page.locator('.btn-confirm').click()
+  await expect(filterRowByTitle(page, title)).toHaveCount(0, { timeout: 5000 })
+}
+
 // --- Open / close ---
 
 test('filter manager opens fullscreen', async ({ page }) => {
@@ -139,23 +157,27 @@ test('creates a filter and it appears in the list', async ({ page }) => {
 
   await expect(page.locator('.filter-manager')).toBeVisible({ timeout: 5000 })
   await expect(page.locator('.filter-list')).toBeVisible()
-  await expect(page.locator('.filter-title').filter({ hasText: 'Playwright create test' })).toBeVisible()
+  await expect(filterRowByTitle(page, 'Playwright create test')).toBeVisible()
+
+  await deleteFilterByTitle(page, 'Playwright create test')
 })
 
 test('created filter defaults to enabled', async ({ page }) => {
   await openFilterManager(page)
   await createFilter(page, { title: 'Playwright enabled test' })
 
-  const row = page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: 'Playwright enabled test' }) })
+  const row = filterRowByTitle(page, 'Playwright enabled test')
   const checkbox = row.locator('input[type="checkbox"]')
   await expect(checkbox).toBeChecked()
+
+  await deleteFilterByTitle(page, 'Playwright enabled test')
 })
 
 test('toggling enabled updates the checkbox', async ({ page }) => {
   await openFilterManager(page)
   await createFilter(page, { title: 'Playwright toggle test' })
 
-  const row = page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: 'Playwright toggle test' }) })
+  const row = filterRowByTitle(page, 'Playwright toggle test')
   const checkbox = row.locator('input[type="checkbox"]')
 
   await expect(checkbox).toBeChecked()
@@ -165,15 +187,17 @@ test('toggling enabled updates the checkbox', async ({ page }) => {
   // Reload to confirm persistence
   await page.reload()
   await openFilterManager(page)
-  const reloadedRow = page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: 'Playwright toggle test' }) })
+  const reloadedRow = filterRowByTitle(page, 'Playwright toggle test')
   await expect(reloadedRow.locator('input[type="checkbox"]')).not.toBeChecked()
+
+  await deleteFilterByTitle(page, 'Playwright toggle test')
 })
 
 test('editing a filter updates it in the list', async ({ page }) => {
   await openFilterManager(page)
   await createFilter(page, { title: 'Playwright edit test' })
 
-  const row = page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: 'Playwright edit test' }) })
+  const row = filterRowByTitle(page, 'Playwright edit test')
   await row.locator('[title="Edit"]').click()
   await expect(page.locator('.filter-editor')).toBeVisible()
   await expect(page.locator('.editor-title')).toHaveText('Edit filter')
@@ -183,33 +207,37 @@ test('editing a filter updates it in the list', async ({ page }) => {
   await page.locator('.btn-save').click()
 
   await expect(page.locator('.filter-manager')).toBeVisible({ timeout: 5000 })
-  await expect(page.locator('.filter-title').filter({ hasText: 'Playwright edit test -- updated' })).toBeVisible()
-  await expect(page.locator('.filter-title').filter({ hasText: 'Playwright edit test' }).filter({ hasNot: page.locator(':has-text("updated")') })).not.toBeVisible()
+  await expect(filterRowByTitle(page, 'Playwright edit test -- updated')).toBeVisible()
+  await expect(filterRowByTitle(page, 'Playwright edit test')).toHaveCount(0)
+
+  await deleteFilterByTitle(page, 'Playwright edit test -- updated')
 })
 
 test('deleting a filter removes it from the list', async ({ page }) => {
   await openFilterManager(page)
   await createFilter(page, { title: 'Playwright delete test' })
 
-  const row = page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: 'Playwright delete test' }) })
+  const row = filterRowByTitle(page, 'Playwright delete test')
   await row.locator('[title="Delete"]').click()
 
   // Confirm dialog
   await expect(page.locator('.dialog')).toBeVisible({ timeout: 3000 })
   await page.locator('.btn-confirm').click()
 
-  await expect(page.locator('.filter-title').filter({ hasText: 'Playwright delete test' })).not.toBeVisible({ timeout: 5000 })
+  await expect(filterRowByTitle(page, 'Playwright delete test')).toHaveCount(0, { timeout: 5000 })
 })
 
 test('cancelling delete leaves filter in the list', async ({ page }) => {
   await openFilterManager(page)
   await createFilter(page, { title: 'Playwright cancel delete test' })
 
-  const row = page.locator('.filter-row').filter({ has: page.locator('.filter-title', { hasText: 'Playwright cancel delete test' }) })
+  const row = filterRowByTitle(page, 'Playwright cancel delete test')
   await row.locator('[title="Delete"]').click()
 
   await page.locator('.btn-cancel').click()
-  await expect(page.locator('.filter-title').filter({ hasText: 'Playwright cancel delete test' })).toBeVisible()
+  await expect(filterRowByTitle(page, 'Playwright cancel delete test')).toBeVisible()
+
+  await deleteFilterByTitle(page, 'Playwright cancel delete test')
 })
 
 // --- Rule options ---
@@ -220,12 +248,14 @@ test('filter editor shows all rule type options', async ({ page }) => {
 
   const ruleTypeSelect = page.locator('.rule-row .field-select').first()
   const options = ruleTypeSelect.locator('option')
-  await expect(options.filter({ hasText: 'Title' })).toHaveCount(1)
-  await expect(options.filter({ hasText: 'Content' })).toHaveCount(1)
-  await expect(options.filter({ hasText: 'Title or Content' })).toHaveCount(1)
-  await expect(options.filter({ hasText: 'Link' })).toHaveCount(1)
-  await expect(options.filter({ hasText: 'Author' })).toHaveCount(1)
-  await expect(options.filter({ hasText: 'Tags' })).toHaveCount(1)
+  // hasText does substring matching, so 'Title' and 'Content' must be matched exactly
+  // to avoid also matching the 'Title or Content' option.
+  await expect(options.filter({ hasText: /^Title$/ })).toHaveCount(1)
+  await expect(options.filter({ hasText: /^Content$/ })).toHaveCount(1)
+  await expect(options.filter({ hasText: /^Title or Content$/ })).toHaveCount(1)
+  await expect(options.filter({ hasText: /^Link$/ })).toHaveCount(1)
+  await expect(options.filter({ hasText: /^Author$/ })).toHaveCount(1)
+  await expect(options.filter({ hasText: /^Tags$/ })).toHaveCount(1)
 })
 
 test('add rule button appends another rule row', async ({ page }) => {

@@ -22,6 +22,11 @@ test('document.title is Rhesus after navigating to a second feed', async ({ page
   const feeds = page.locator('.feed-item')
   await feeds.first().click()
   await expect(page.locator('.article-list')).toBeVisible({ timeout: 10000 })
+
+  // Selecting a feed auto-collapses the sidebar, so it must be reopened before
+  // the next feed item is reachable/clickable.
+  await page.locator('[title="Toggle sidebar"]').click()
+  await expect(page.locator('.feed-tree')).toBeVisible({ timeout: 10000 })
   await feeds.nth(1).click()
   await expect(page.locator('.article-list')).toBeVisible({ timeout: 10000 })
   const title = await page.title()

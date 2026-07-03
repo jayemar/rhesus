@@ -19,7 +19,12 @@ test('settings panel opens and closes', async ({ page }) => {
 test('font select shows all options', async ({ page }) => {
   await openSettings(page)
 
-  const fontSelect = page.locator('select').filter({ has: page.locator('option[value="system"]') })
+  // Both the Theme and Font selects have an option[value="system"], so filter by
+  // the row's exact label text instead to avoid an ambiguous match.
+  const fontSelect = page
+    .locator('.select-row')
+    .filter({ has: page.locator('span', { hasText: /^Font$/ }) })
+    .locator('select')
   await expect(fontSelect).toBeVisible()
 
   const options = fontSelect.locator('option')
@@ -34,9 +39,18 @@ test('font select shows all options', async ({ page }) => {
 test('selecting a font applies the font to the body', async ({ page }) => {
   await openSettings(page)
 
-  const fontSelect = page.locator('select').filter({ has: page.locator('option[value="system"]') })
+  // Both the Theme and Font selects have an option[value="system"], so filter by
+  // the row's exact label text instead to avoid an ambiguous match.
+  const fontSelect = page
+    .locator('.select-row')
+    .filter({ has: page.locator('span', { hasText: /^Font$/ }) })
+    .locator('select')
   await fontSelect.selectOption('lora')
 
-  const bodyFont = await page.evaluate(() => window.getComputedStyle(document.body).fontFamily)
-  expect(bodyFont.toLowerCase()).toContain('lora')
+  // The font is applied reactively via a watcher, which can lag one tick behind
+  // the selectOption resolving, so poll rather than reading the style immediately.
+  await page.waitForFunction(
+    () => window.getComputedStyle(document.body).fontFamily.toLowerCase().includes('lora'),
+    { timeout: 5000 },
+  )
 })

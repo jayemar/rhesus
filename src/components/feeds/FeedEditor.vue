@@ -122,7 +122,7 @@
             >
               <div class="feed-title-col">
                 <span class="feed-title" :title="feed.feed_url">{{ feed.title }}</span>
-                <span v-if="expandedErrorId === feed.id" class="feed-error-msg">{{ feed.last_error }}</span>
+                <span v-if="expandedErrorId === feed.id" class="feed-error-msg" :title="feed.last_error">{{ interpretError(feed.last_error ?? '') }}</span>
               </div>
               <button
                 v-if="feed.last_error && editingId !== feed.id"
@@ -280,6 +280,22 @@ function toggleCat(catId: number) {
 
 function toggleError(feedId: number) {
   expandedErrorId.value = expandedErrorId.value === feedId ? null : feedId
+}
+
+function interpretError(err: string): string {
+  if (/Empty feed data provided/i.test(err))
+    return 'Bot protection or error page received instead of feed content'
+  if (/Opening and ending tag mismatch:.*\b(head|meta|link)\b/i.test(err))
+    return 'Bot protection or error page received instead of feed content'
+  if (/403 Forbidden/i.test(err)) return 'Access blocked (HTTP 403)'
+  if (/404 Not Found/i.test(err)) return 'Feed not found (HTTP 404)'
+  if (/503|Service Unavailable/i.test(err)) return 'Server unavailable (HTTP 503)'
+  if (/429|Too Many Requests|throttled/i.test(err)) return 'Rate limited (HTTP 429)'
+  if (/cURL error 28|timed out|Operation timed out/i.test(err)) return 'Connection timed out'
+  if (/cURL error 6|Could not resolve host/i.test(err)) return 'DNS lookup failed'
+  if (/no content was received/i.test(err)) return 'Feed returned empty response'
+  if (/LibXML error/i.test(err)) return 'Feed XML is malformed'
+  return err
 }
 
 function startEdit(feed: ApiFeed) {
@@ -827,7 +843,10 @@ h3 {
   transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
 
-.feed-error-btn:hover,
+.feed-error-btn:hover {
+  opacity: 1;
+}
+
 .feed-error-btn.active {
   opacity: 1;
   background: var(--color-danger);

@@ -30,7 +30,7 @@
       <Rss v-else class="feed-icon" :size="16" aria-label="RSS" />
       <div class="card-body">
         <div class="card-meta">
-          <span class="feed-name">{{ article.feed_title }}</span>
+          <span class="feed-name" @click.stop="goToFeed(article.feed_id)">{{ article.feed_title }}</span>
         </div>
         <h2 class="card-title">{{ article.title }}</h2>
         <p v-if="showExcerpt && article.excerpt" class="card-excerpt">{{ truncatedExcerpt }}</p>
@@ -52,6 +52,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import { Star, Check, Rss, Tag } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -67,6 +68,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ select: []; copied: [label: string] }>()
 
+const router = useRouter()
 const settingsStore = useSettingsStore()
 const articlesStore = useArticlesStore()
 const { settings } = storeToRefs(settingsStore)
@@ -311,6 +313,10 @@ function onCardClick() {
   }
   emit('select')
 }
+
+function goToFeed(feedId: number) {
+  router.replace({ name: 'feed', params: { id: String(feedId) } })
+}
 </script>
 
 <style scoped>
@@ -395,6 +401,15 @@ img.feed-icon {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   margin-bottom: 4px;
+}
+
+.feed-name {
+  cursor: pointer;
+}
+
+.feed-name:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
 }
 
 .card-right {

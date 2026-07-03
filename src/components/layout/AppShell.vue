@@ -3,7 +3,12 @@
     <!-- Top bar -->
     <header class="topbar">
       <button class="icon-btn" title="Toggle sidebar" @pointerdown="onIconBtnPointerDown" @click="toggleSidebar"><Menu :size="16" /></button>
-      <span class="topbar-title">
+      <span
+        class="topbar-title"
+        :class="{ 'topbar-title-link': canOpenFeedUrl }"
+        :title="canOpenFeedUrl ? 'Open feed URL' : undefined"
+        @click="openFeedUrl"
+      >
         {{ feedsStore.selection?.title ?? 'Rhesus' }}
         <span v-if="feedsStore.selection && unreadCount > 0" class="topbar-unread">({{ unreadCount }})</span>
       </span>
@@ -78,19 +83,37 @@
     <main class="main-content">
       <ArticleList :show-search="showArticleSearch" @copied="showCopyToast" @close-search="showArticleSearch = false" />
       <Transition name="overlay">
-        <div v-if="showSettings" class="settings-overlay" @keydown.esc="showSettings = false">
+        <div
+          v-if="showSettings"
+          class="settings-overlay"
+          tabindex="-1"
+          @vue:mounted="focusOverlay"
+          @keydown.esc="showSettings = false"
+        >
           <button class="settings-close" title="Close" @click="showSettings = false"><X :size="14" /></button>
           <SettingsPanel />
         </div>
       </Transition>
       <Transition name="overlay">
-        <div v-if="showFeedEditor" class="settings-overlay" @keydown.esc="showFeedEditor = false">
+        <div
+          v-if="showFeedEditor"
+          class="settings-overlay"
+          tabindex="-1"
+          @vue:mounted="focusOverlay"
+          @keydown.esc="showFeedEditor = false"
+        >
           <button class="settings-close" title="Close" @click="showFeedEditor = false"><X :size="14" /></button>
           <FeedEditor />
         </div>
       </Transition>
       <Transition name="overlay">
-        <div v-if="showFilterManager" class="settings-overlay" @keydown.esc="showFilterManager = false">
+        <div
+          v-if="showFilterManager"
+          class="settings-overlay"
+          tabindex="-1"
+          @vue:mounted="focusOverlay"
+          @keydown.esc="showFilterManager = false"
+        >
           <button class="settings-close" title="Close" @click="showFilterManager = false"><X :size="14" /></button>
           <FilterManager />
         </div>
@@ -113,8 +136,8 @@
                 @pointercancel="onTitlePointerCancel"
               >{{ selectedArticle.title }}</h1>
               <div class="reader-meta">
+                <span class="reader-meta-feed" @click="goToFeed(selectedArticle.feed_id)">{{ selectedArticle.feed_title }}</span>
                 <span v-if="selectedArticle.author">{{ selectedArticle.author }}</span>
-                <span>{{ selectedArticle.feed_title }}</span>
                 <span>{{ formatArticleDate(selectedArticle.updated) }}</span>
                 <span v-if="readingTime(selectedArticle.content) > 0">
                   {{ readingTime(selectedArticle.content) }} min read
@@ -152,6 +175,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import type { VNode } from 'vue'
 import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
@@ -388,6 +412,10 @@ function onPopState() {
   articlesStore.select(null)
 }
 
+function focusOverlay(vnode: VNode) {
+  (vnode.el as HTMLElement).focus()
+}
+
 function closeReader() {
   showScrollTop.value = false
   if (historyPushed.value) {
@@ -396,6 +424,25 @@ function closeReader() {
   } else {
     articlesStore.select(null)
   }
+}
+
+function goToFeed(feedId: number) {
+  historyPushed.value = false
+  articlesStore.select(null)
+  router.replace({ name: 'feed', params: { id: String(feedId) } })
+}
+
+function selectionSiteUrl(): string | undefined {
+  const sel = feedsStore.selection
+  if (!sel || sel.isCategory || sel.id <= 0) return undefined
+  return articles.value.find((a) => a.feed_id === sel.id)?.site_url
+}
+
+const canOpenFeedUrl = computed(() => !!selectionSiteUrl())
+
+function openFeedUrl() {
+  const url = selectionSiteUrl()
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 const effectiveTheme = computed(() => {
@@ -620,6 +667,14 @@ async function refresh() {
   text-overflow: ellipsis;
 }
 
+.topbar-title-link {
+  cursor: pointer;
+}
+
+.topbar-title-link:hover {
+  text-decoration: underline;
+}
+
 .topbar-unread {
   font-size: var(--font-size-sm);
   font-weight: 400;
@@ -788,13 +843,19 @@ async function refresh() {
 
 .settings-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
   right: 0;
   bottom: 0;
   z-index: 20;
   background: var(--color-bg);
   overflow: hidden;
+  outline: none;
+  transition: left var(--transition-normal);
+}
+
+.sidebar-collapsed .settings-overlay {
+  left: 0;
 }
 
 .settings-close {
@@ -904,6 +965,15 @@ async function refresh() {
   color: var(--color-text-muted);
 }
 
+.reader-meta-feed {
+  cursor: pointer;
+}
+
+.reader-meta-feed:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
 .reader-meta span + span::before {
   content: ' \B7 ';
   padding: 0 4px;
@@ -976,6 +1046,10 @@ async function refresh() {
   }
 
   .content-overlay {
+    left: 0;
+  }
+
+  .settings-overlay {
     left: 0;
   }
 

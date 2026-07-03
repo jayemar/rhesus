@@ -1,5 +1,5 @@
 <template>
-  <div class="article-list" ref="listEl" :style="pullUpDist > 0 ? { transform: `translateY(${-(pullUpDist * 20).toFixed(1)}px)` } : {}">
+  <div class="article-list" ref="listEl" :style="pullVisualPx > 0 ? { transform: `translateY(${-pullVisualPx.toFixed(1)}px)` } : {}">
     <div v-if="props.showSearch && feedsStore.selection && !articlesStore.loading" class="search-bar">
       <Search :size="13" class="search-icon" />
       <input
@@ -161,6 +161,10 @@ function toggleArticle(id: number) {
 
 // Pull-up-to-action: wheel overscroll on desktop, touch swipe on mobile
 const pullUpDist = ref(0)
+// Visual offset for the list transform. Kept separate from pullUpDist (the
+// normalized 0-1 progress used for the ready threshold/label) so touch drags
+// can track the finger 1:1 instead of a small fixed nudge.
+const pullVisualPx = ref(0)
 const PULL_WHEEL = 300
 const PULL_TOUCH = window.innerHeight * 0.2
 
@@ -175,6 +179,7 @@ function isAtBottom(): boolean {
 
 async function executePullAction() {
   pullUpDist.value = 0
+  pullVisualPx.value = 0
   const sel = feedsStore.selection
   if (!sel || articlesStore.loading) return
   await articlesStore.markAllRead()
@@ -190,16 +195,19 @@ function onWheel(e: WheelEvent) {
     if (wheelAccum > 0 || pullUpDist.value > 0) {
       wheelAccum = 0
       pullUpDist.value = 0
+      pullVisualPx.value = 0
     }
     return
   }
   const delta = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaMode === 2 ? e.deltaY * window.innerHeight : e.deltaY
   wheelAccum += delta
   pullUpDist.value = Math.min(wheelAccum / PULL_WHEEL, 1)
+  pullVisualPx.value = pullUpDist.value * 20
   if (wheelResetTimer) clearTimeout(wheelResetTimer)
   wheelResetTimer = setTimeout(() => {
     wheelAccum = 0
     pullUpDist.value = 0
+    pullVisualPx.value = 0
   }, 600)
   if (pullUpDist.value >= 1) {
     if (wheelResetTimer) clearTimeout(wheelResetTimer)
@@ -221,6 +229,9 @@ function onTouchMove(e: TouchEvent) {
   if (!touchAtBottom || !feedsStore.selection) return
   const dy = touchStartY - (e.touches[0]?.clientY ?? touchStartY)
   pullUpDist.value = dy > 0 ? Math.min(dy / PULL_TOUCH, 1) : 0
+  // Track the finger 1:1 (capped at the threshold distance) instead of a
+  // fixed small nudge, so the list visually follows the drag.
+  pullVisualPx.value = dy > 0 ? Math.min(dy, PULL_TOUCH) : 0
 }
 
 function onTouchEnd() {
@@ -228,6 +239,7 @@ function onTouchEnd() {
     executePullAction()
   } else {
     pullUpDist.value = 0
+    pullVisualPx.value = 0
   }
   touchAtBottom = false
 }

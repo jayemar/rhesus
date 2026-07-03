@@ -77,6 +77,7 @@ export interface ApiArticle {
   author: string
   feed_id: number
   feed_title: string
+  site_url?: string
   content: string
   excerpt?: string
   attachments?: ApiAttachment[]

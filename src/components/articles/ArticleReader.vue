@@ -947,6 +947,12 @@ function parseHero(content: string): { src: string | null; alt: string; caption:
   const parser = new DOMParser()
   const doc = parser.parseFromString(content, 'text/html')
 
+  // Resolve relative image/link URLs (e.g. a site emitting <img src="../media/x.jpg">)
+  // before picking a hero candidate - otherwise a relative src extracted here would
+  // never go through processContent()'s own resolveRelativeUrls() call, since that
+  // only runs on the body content left AFTER the hero is pulled out.
+  resolveRelativeUrls(doc, props.article.link ?? undefined)
+
   for (const img of doc.querySelectorAll('img')) {
     if (isIconSizedImage(img)) continue
 
@@ -1100,6 +1106,35 @@ const imageAttachments = computed(() => {
   if (!heroUrl.value) return images
   return []
 })
+
+// Collapse images that fail to load rather than showing a broken-image icon.
+// This backstops every upstream heuristic: beacons with no dimensions and an
+// innocuous URL, dead CDN links in old articles, and anything else that slips
+// through server-side stripping. Listeners are (re)attached whenever the
+// rendered content changes, since v-html replaces the DOM wholesale.
+function hideBrokenImage(ev: Event) {
+  (ev.target as HTMLElement).style.display = 'none'
+}
+
+watch(
+  () => [readerContent.value, contentEl.value] as const,
+  () => {
+    nextTick(() => {
+      const el = contentEl.value
+      if (!el) return
+      for (const img of el.querySelectorAll('img')) {
+        // Already finished loading and failed (e.g. cached failure before
+        // this watcher ran): hide immediately, no error event will re-fire
+        if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) {
+          img.style.display = 'none'
+        } else {
+          img.addEventListener('error', hideBrokenImage, { once: true })
+        }
+      }
+    })
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>

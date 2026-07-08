@@ -33,7 +33,7 @@
           <span class="feed-name" @click.stop="goToFeed(article.feed_id)">{{ article.feed_title }}</span>
         </div>
         <h2 class="card-title">{{ article.title }}</h2>
-        <p v-if="showExcerpt && article.excerpt" class="card-excerpt">{{ truncatedExcerpt }}</p>
+        <p v-if="showExcerpt && truncatedExcerpt" class="card-excerpt">{{ truncatedExcerpt }}</p>
       </div>
       <div class="card-right">
         <div class="card-right-top">
@@ -112,7 +112,19 @@ function decodeHtmlEntities(html: string): string {
 }
 
 const truncatedExcerpt = computed(() => {
-  const text = decodeHtmlEntities(props.article.excerpt ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  let text = decodeHtmlEntities(props.article.excerpt ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+
+  // Server-computed excerpt can come back empty even when the article has
+  // real text (e.g. TT-RSS's strip_tags()-based excerpt loses track of tag
+  // boundaries on malformed markup like an unescaped apostrophe inside a
+  // single-quoted attribute). Fall back to a DOM-parsed excerpt from the
+  // full content, which correctly tokenizes attributes regardless.
+  if (!text && props.article.content) {
+    const div = document.createElement('div')
+    div.innerHTML = props.article.content
+    text = (div.textContent ?? '').replace(/\s+/g, ' ').trim()
+  }
+
   const max = excerptLines.value * 80
   return text.length > max ? text.slice(0, max).trimEnd() + '…' : text
 })

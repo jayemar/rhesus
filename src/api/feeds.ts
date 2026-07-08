@@ -1,4 +1,4 @@
-import { call } from './client'
+import { call, getSid, ApiError } from './client'
 import type { ApiFeedTreeItem, ApiFeed, ApiCategory } from '@/types/api'
 
 export async function getFeedTree(): Promise<ApiFeedTreeItem[]> {
@@ -35,9 +35,42 @@ export async function addFeed(feedUrl: string, categoryId: number): Promise<Subs
 
 export async function editFeed(
   feedId: number,
-  params: { title?: string; feed_url?: string; cat_id?: number; update_interval?: number },
+  params: { title?: string; feed_url?: string; cat_id?: number; update_interval?: number; note?: string },
 ): Promise<void> {
   await call('editFeed', { feed_id: feedId, ...params })
+}
+
+export async function getFeedNotes(): Promise<Record<number, string>> {
+  const res = await call<{ notes: Record<number, string> }>('getFeedNotes')
+  return res.notes ?? {}
+}
+
+// Uses a standalone endpoint rather than the JSON API's call() helper: the
+// sid-token API only accepts JSON bodies, but a file upload needs
+// multipart/form-data. See rhesus_settings/upload_icon.php for why this is
+// its own script rather than a plugin API method.
+export async function uploadFeedIcon(feedId: number, file: File): Promise<void> {
+  const sid = getSid()
+  const fd = new FormData()
+  if (sid) fd.append('sid', sid)
+  fd.append('feed_id', String(feedId))
+  fd.append('icon_file', file)
+
+  const res = await fetch('/tt-rss/plugins.local/rhesus_settings/upload_icon.php', {
+    method: 'POST',
+    body: fd,
+  })
+  if (!res.ok) {
+    throw new ApiError('HTTP_ERROR', `HTTP ${res.status}`)
+  }
+  const json = await res.json()
+  if (json.status !== 0) {
+    throw new ApiError(json.content?.error ?? 'UNKNOWN_ERROR', json.content?.detected_type)
+  }
+}
+
+export async function removeFeedIcon(feedId: number): Promise<void> {
+  await call('removeFeedIcon', { feed_id: feedId })
 }
 
 export async function importOpml(content: string): Promise<void> {

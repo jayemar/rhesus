@@ -218,11 +218,22 @@ function findInTree(items: typeof tree.value, bareId: number): (typeof tree.valu
 
 const baseServerUnread = ref(0)
 
+// readCountDelta exists purely to reflect mark-read actions instantly, ahead
+// of the next tree refresh. Once a fresh tree fetch gives us a real server
+// count for the selected feed, that count already reflects every read that's
+// been synced so far - so the delta's job is done and it must be reset here.
+// Without this, a stale delta from e.g. marking a big batch read (pull-to-
+// refresh's mark-all-then-fetch-new) keeps subtracting from the NEXT fresh
+// count too, which can drive it to 0 and hide the badge even when genuinely
+// new unread articles just arrived.
 watchEffect(() => {
   const sel = selection.value
   if (!sel) { baseServerUnread.value = 0; return }
   const node = findInTree(tree.value, sel.id)
-  if (node) baseServerUnread.value = node.unread
+  if (node) {
+    baseServerUnread.value = node.unread
+    articlesStore.readCountDelta = 0
+  }
 })
 
 const unreadCount = computed(() =>

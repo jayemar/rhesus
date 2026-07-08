@@ -23,10 +23,50 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("deleteFilter", $this);
         $host->add_api_method("setFilterEnabled", $this);
         $host->add_api_method("editFeed", $this);
+        $host->add_api_method("getFeedNotes", $this);
+        $host->add_api_method("removeFeedIcon", $this);
         $host->add_api_method("importOpml", $this);
         $host->add_api_method("fetchFullContent", $this);
         $host->add_api_method("resolveSubscribeUrl", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
+        $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
+    }
+
+    // Fix common XML malformations in raw feed content before LibXML parsing.
+    public function hook_feed_fetched($feed_data, $fetch_url, $owner_uid, $feed): string {
+        // If the response is an HTML page (bot-protection challenge, error page, etc.)
+        // return empty string so FeedParser stores 'Empty feed data provided' as last_error,
+        // which Rhesus maps to a human-readable bot-protection message.
+        $trimmed = ltrim($feed_data);
+        if (stripos($trimmed, '<html') === 0 || stripos($trimmed, '<!doctype') === 0) {
+            return '';
+        }
+
+        // Error 23: bare & not part of a valid entity reference (e.g. URLs with &param=value).
+        $feed_data = preg_replace(
+            '/&(?!(?:[a-zA-Z][a-zA-Z0-9]*|#[0-9]+|#x[0-9a-fA-F]+);)/',
+            '&amp;',
+            $feed_data
+        );
+
+        // Error 76: HTML void elements with attributes that lack a self-closing slash
+        // (e.g. <link rel="stylesheet"> or <meta charset="utf-8"> embedded in feed content).
+        // Matching on \s ensures the tag has attributes, which distinguishes HTML <link rel=...>
+        // from the RSS channel <link>https://...</link> (no attributes, won't match).
+        // The [^\/] before > ensures already-self-closed tags are left alone.
+        $voids = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+                  'link', 'meta', 'param', 'source', 'track', 'wbr'];
+        foreach ($voids as $tag) {
+            $feed_data = preg_replace(
+                '/<' . $tag . '(\s[^>]*[^\/])>/i',
+                '<' . $tag . '$1/>',
+                $feed_data
+            );
+        }
+        // Also self-close attribute-less <br> and <hr>.
+        $feed_data = (string) preg_replace('/<(br|hr)>/i', '<$1/>', $feed_data);
+
+        return $feed_data;
     }
 
     public function hook_headlines_custom_sort_override($order) {
@@ -298,7 +338,71 @@ class Rhesus_Settings extends Plugin {
             $cat_id = (int)$_REQUEST['cat_id'];
             $feed->cat_id = $cat_id > 0 ? $cat_id : null;
         }
+        if (isset($_REQUEST['update_interval'])) {
+            $feed->update_interval = (int)$_REQUEST['update_interval'];
+        }
+        if (isset($_REQUEST['note'])) {
+            $notes = $this->get_feed_notes_map();
+            $note = trim($_REQUEST['note']);
+            if ($note === '') {
+                unset($notes[$feed_id]);
+            } else {
+                $notes[$feed_id] = $note;
+            }
+            $this->host->set($this, "feed_notes", json_encode($notes));
+        }
         $feed->save();
+        return [0, ["status" => "OK"]];
+    }
+
+    // Returns the current user's {feed_id: note} map, decoded from plugin storage.
+    private function get_feed_notes_map(): array {
+        $raw = $this->host->get($this, "feed_notes", null);
+        $decoded = $raw !== null ? json_decode($raw, true) : null;
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    // Returns all of the current user's feed notes as {feed_id: note}.
+    // Called via: POST /tt-rss/api/ {"op":"getFeedNotes","sid":"..."}
+    public function getFeedNotes(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        return [0, ["notes" => $this->get_feed_notes_map()]];
+    }
+
+    // Removes a feed's custom icon, restoring core's normal auto-detected
+    // favicon behavior. Mirrors Pref_Feeds::removeIcon().
+    // Called via: POST /tt-rss/api/ {"op":"removeFeedIcon","sid":"...","feed_id":N}
+    public function removeFeedIcon(): array {
+        $feed_id = (int)($_REQUEST['feed_id'] ?? 0);
+        if (!$feed_id) {
+            return [1, ["error" => "MISSING_FEED_ID"]];
+        }
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $feed = ORM::for_table('ttrss_feeds')
+            ->where(['id' => $feed_id, 'owner_uid' => $uid])
+            ->find_one();
+        if (!$feed) {
+            return [1, ["error" => "FEED_NOT_FOUND"]];
+        }
+
+        $cache = DiskCache::instance('feed-icons');
+        if ($cache->exists((string)$feed_id)) {
+            $cache->remove((string)$feed_id);
+        }
+
+        $feed->set([
+            'favicon_avg_color' => null,
+            'favicon_last_checked' => '1970-01-01',
+            'favicon_is_custom' => false,
+        ]);
+        $feed->save();
+
         return [0, ["status" => "OK"]];
     }
 
@@ -390,13 +494,46 @@ class Rhesus_Settings extends Plugin {
         }
 
         $contents = UrlHelper::fetch(['url' => $url]);
-        if (!$contents) return [0, ["url" => $url, "discovered" => false]];
 
-        $ct = UrlHelper::$fetch_last_content_type ?? '';
-        if (!str_contains($ct, 'html')) return [0, ["url" => $url, "discovered" => false]];
+        if ($contents) {
+            $ct = UrlHelper::$fetch_last_content_type ?? '';
+            if (str_contains($ct, 'html')) {
+                $feedUrls = $this->extractFeedLinks($url, $contents);
+                if (count($feedUrls) === 1) return [0, ["url" => $feedUrls[0], "discovered" => true]];
+                if (count($feedUrls) > 1) {
+                    // Multiple feeds found: prefer the one matching the root /feed/ path,
+                    // otherwise take the first. This avoids a second request to TT-RSS
+                    // that would re-trigger autodiscovery (and potentially hit WAF rate limits).
+                    $parsed_origin = parse_url($url);
+                    $root_feed = $parsed_origin['scheme'] . '://' . $parsed_origin['host'] . '/feed/';
+                    $best = in_array($root_feed, $feedUrls) ? $root_feed : $feedUrls[0];
+                    return [0, ["url" => $best, "discovered" => true]];
+                }
+            } elseif (str_contains($ct, 'rss') || str_contains($ct, 'atom') || str_contains($ct, 'xml')) {
+                return [0, ["url" => $url, "discovered" => false]];
+            }
+        }
 
-        $feedUrls = $this->extractFeedLinks($url, $contents);
-        if (count($feedUrls) === 1) return [0, ["url" => $feedUrls[0], "discovered" => true]];
+        // Homepage fetch failed or had no discoverable feed links.
+        // Try common feed path patterns before giving up.
+        $parsed_base = parse_url($url);
+        $origin = $parsed_base['scheme'] . '://' . $parsed_base['host'];
+        $candidates = [
+            $origin . '/feed/',
+            $origin . '/rss/',
+            $origin . '/atom.xml',
+            $origin . '/feed.xml',
+            $origin . '/rss.xml',
+        ];
+        foreach ($candidates as $candidate) {
+            $probe = UrlHelper::fetch(['url' => $candidate]);
+            if ($probe) {
+                $ct = UrlHelper::$fetch_last_content_type ?? '';
+                if (str_contains($ct, 'rss') || str_contains($ct, 'atom') || str_contains($ct, 'xml')) {
+                    return [0, ["url" => $candidate, "discovered" => true]];
+                }
+            }
+        }
 
         return [0, ["url" => $url, "discovered" => false]];
     }

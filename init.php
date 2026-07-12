@@ -28,6 +28,8 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("importOpml", $this);
         $host->add_api_method("fetchFullContent", $this);
         $host->add_api_method("resolveSubscribeUrl", $this);
+        $host->add_api_method("previewFeed", $this);
+        $host->add_api_method("getStarredCount", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
         $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
     }
@@ -372,6 +374,23 @@ class Rhesus_Settings extends Plugin {
         return [0, ["notes" => $this->get_feed_notes_map()]];
     }
 
+    // Total starred article count (read + unread). Native TT-RSS's
+    // getFeedTree/getUnread always call Feeds::_get_counters() with
+    // unread_only hardcoded to true, so there's no way to get a total
+    // through the public API for the Starred virtual feed - this mirrors
+    // what that function does internally for FEED_STARRED, just without
+    // the unread_only filter.
+    public function getStarredCount(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $sth = Db::pdo()->prepare("SELECT COUNT(*) AS count FROM ttrss_user_entries WHERE owner_uid = ? AND marked = true");
+        $sth->execute([$uid]);
+        $row = $sth->fetch();
+        return [0, ["count" => (int)($row['count'] ?? 0)]];
+    }
+
     // Removes a feed's custom icon, restoring core's normal auto-detected
     // favicon behavior. Mirrors Pref_Feeds::removeIcon().
     // Called via: POST /tt-rss/api/ {"op":"removeFeedIcon","sid":"...","feed_id":N}
@@ -472,26 +491,73 @@ class Rhesus_Settings extends Plugin {
     // the discovered feed URL. Otherwise returns the original URL unchanged.
     // Works around a TT-RSS bug where subscribeToFeed returns code 6 because it
     // fails to re-fetch content after extracting the autodiscovered feed URL.
+    // Blocks anything other than plain http(s) on standard ports, and any
+    // hostname resolving to a private/reserved IP (SSRF protection) - both
+    // resolveSubscribeUrl() and previewFeed() fetch a user-supplied URL
+    // server-side, so both need this.
+    private function validateFetchUrl(string $url): ?string {
+        $parsed = parse_url($url);
+        $scheme = strtolower($parsed['scheme'] ?? '');
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            return "INVALID_URL";
+        }
+        $host = $parsed['host'] ?? '';
+        $port = isset($parsed['port']) ? (int)$parsed['port'] : ($scheme === 'https' ? 443 : 80);
+        if ($port !== 80 && $port !== 443) {
+            return "INVALID_URL";
+        }
+        $ip = gethostbyname($host);
+        if (filter_var($ip, FILTER_VALIDATE_IP) &&
+            !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return "INVALID_URL";
+        }
+        return null;
+    }
+
+    public function previewFeed(): array {
+        $url = trim($_REQUEST['url'] ?? '');
+        if ($url === '') return [1, ["error" => "MISSING_URL"]];
+        if (($_SESSION['uid'] ?? null) === null) return [1, ["error" => "NOT_LOGGED_IN"]];
+
+        if ($err = $this->validateFetchUrl($url)) return [1, ["error" => $err]];
+
+        $contents = UrlHelper::fetch(['url' => $url]);
+        if (empty($contents)) {
+            return [1, ["error" => "FETCH_FAILED", "message" => truncate_string(clean(UrlHelper::$fetch_last_error), 250, '…')]];
+        }
+
+        $fp = new FeedParser($contents);
+        // get_type() alone (as native subscribe uses) only validates the feed
+        // is recognizable - it doesn't populate items/title/link. init() is
+        // what actually parses the document into FeedItem objects.
+        if (!$fp->init()) {
+            $msg = $fp->error() ?: $contents;
+            return [1, ["error" => "PARSE_FAILED", "message" => truncate_string(clean($msg), 250, '…')]];
+        }
+
+        $items = [];
+        foreach (array_slice($fp->get_items(), 0, 20) as $item) {
+            $items[] = [
+                "title" => $item->get_title(),
+                "link" => $item->get_link(),
+                "date" => $item->get_date() ?: null,
+                "description" => truncate_string(strip_tags($item->get_description()), 200),
+            ];
+        }
+
+        return [0, [
+            "title" => $fp->get_title(),
+            "link" => $fp->get_link(),
+            "items" => $items,
+        ]];
+    }
+
     public function resolveSubscribeUrl(): array {
         $url = trim($_REQUEST['url'] ?? '');
         if ($url === '') return [1, ["error" => "MISSING_URL"]];
         if (($_SESSION['uid'] ?? null) === null) return [1, ["error" => "NOT_LOGGED_IN"]];
 
-        $parsed = parse_url($url);
-        $scheme = strtolower($parsed['scheme'] ?? '');
-        if ($scheme !== 'http' && $scheme !== 'https') {
-            return [1, ["error" => "INVALID_URL"]];
-        }
-        $host = $parsed['host'] ?? '';
-        $port = isset($parsed['port']) ? (int)$parsed['port'] : ($scheme === 'https' ? 443 : 80);
-        if ($port !== 80 && $port !== 443) {
-            return [1, ["error" => "INVALID_URL"]];
-        }
-        $ip = gethostbyname($host);
-        if (filter_var($ip, FILTER_VALIDATE_IP) &&
-            !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-            return [1, ["error" => "INVALID_URL"]];
-        }
+        if ($err = $this->validateFetchUrl($url)) return [1, ["error" => $err]];
 
         $contents = UrlHelper::fetch(['url' => $url]);
 

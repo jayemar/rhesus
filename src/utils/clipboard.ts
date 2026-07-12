@@ -1,7 +1,14 @@
-// Firefox for Android shows a system-level "Copied" notification for ALL clipboard
-// writes (both execCommand and navigator.clipboard), so our own toast is redundant there.
-export const browserShowsNativeToast =
-  /Firefox\/\d/.test(navigator.userAgent) && /Android/i.test(navigator.userAgent)
+// Android 13+ shows a system-level "Copied to clipboard" notification for ANY
+// app/browser's clipboard write (both execCommand and navigator.clipboard) -
+// it's an OS feature, not a Firefox quirk (the original fix here only tested
+// Firefox and missed that Chrome hits the same OS toast), so our own toast is
+// redundant on any Android 13+ browser.
+function androidOsVersion(): number | null {
+  const match = /Android (\d+)/.exec(navigator.userAgent)
+  return match ? Number(match[1]) : null
+}
+
+export const browserShowsNativeToast = (androidOsVersion() ?? 0) >= 13
 
 // Returns true if the copy was silent (caller should show its own notification).
 // Returns false if the browser will show its own clipboard notification.

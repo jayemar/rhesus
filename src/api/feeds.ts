@@ -13,6 +13,11 @@ export async function getAllFeeds(): Promise<ApiFeed[]> {
   return call<ApiFeed[]>('getFeeds', { cat_id: -3, unread_only: false, include_nested: false })
 }
 
+export async function getStarredCount(): Promise<number> {
+  const res = await call<{ count: number }>('getStarredCount')
+  return res.count
+}
+
 export async function getAllCategories(): Promise<ApiCategory[]> {
   return call<ApiCategory[]>('getCategories', { include_empty: true })
 }
@@ -79,6 +84,23 @@ export async function importOpml(content: string): Promise<void> {
 
 export async function resolveSubscribeUrl(url: string): Promise<{ url: string; discovered: boolean }> {
   return call<{ url: string; discovered: boolean }>('resolveSubscribeUrl', { url })
+}
+
+export interface FeedPreviewItem {
+  title: string
+  link: string
+  date: number | null
+  description: string
+}
+
+export interface FeedPreview {
+  title: string
+  link: string
+  items: FeedPreviewItem[]
+}
+
+export async function previewFeed(url: string): Promise<FeedPreview> {
+  return call<FeedPreview>('previewFeed', { url })
 }
 
 export async function refreshFeed(feedId: number): Promise<void> {

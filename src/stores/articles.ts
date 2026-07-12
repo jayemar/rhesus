@@ -13,6 +13,7 @@ export const useArticlesStore = defineStore('articles', () => {
   const currentFeedId = ref<number | null>(null)
   const currentIsCategory = ref(false)
   const readCountDelta = ref(0)
+  const starredCountDelta = ref(0)
 
   const PAGE_SIZE = 200
   const currentViewMode = ref<string>('all_articles')
@@ -118,6 +119,7 @@ export const useArticlesStore = defineStore('articles', () => {
     const article = articles.value.find((a) => a.id === id)
     if (article) {
       article.marked = !article.marked
+      starredCountDelta.value += article.marked ? 1 : -1
       updateArticle([id], ArticleField.Starred, article.marked ? ArticleMode.True : ArticleMode.False)
     }
   }
@@ -180,7 +182,7 @@ export const useArticlesStore = defineStore('articles', () => {
   }
 
   return {
-    articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder, readCountDelta,
+    articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder, readCountDelta, starredCountDelta,
     load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, appendNew, select, setNote, setLabels,
   }
 })

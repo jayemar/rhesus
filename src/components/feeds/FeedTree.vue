@@ -72,6 +72,7 @@
         <FeedItem
           :item="item"
           :selected="isFeedSelected(item)"
+          :always-show-count="'bare_id' in item && item.bare_id === -4 && item.viewMode === 'unread'"
           @select="selectFeed(item)"
         />
       </template>
@@ -91,6 +92,7 @@ import { ref, computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useFeedsStore } from '@/stores/feeds'
+import { useArticlesStore } from '@/stores/articles'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import FeedItem from './FeedItem.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -106,7 +108,8 @@ const emit = defineEmits<{ navigate: [] }>()
 const router = useRouter()
 const route = useRoute()
 const feedsStore = useFeedsStore()
-const { tree } = storeToRefs(feedsStore)
+const articlesStore = useArticlesStore()
+const { tree, starredCount } = storeToRefs(feedsStore)
 
 const openCats = ref<Set<number>>(new Set())
 const labelToDelete = ref<ApiFeedTreeItem | null>(null)
@@ -151,6 +154,23 @@ function findInTree(items: ApiFeedTreeItem[], bareId: number): ApiFeedTreeItem |
   return undefined
 }
 
+// Replaces the Starred (bare_id -1) feed item's unread count with the total
+// starred count instead - the server always reports unread-only counts for
+// every feed (including virtual ones), so this override is done entirely
+// client-side. Recurses into categories since Starred lives inside the
+// "Special"/Lists category, not at the tree's top level.
+function withStarredCount(items: ApiFeedTreeItem[], count: number): ApiFeedTreeItem[] {
+  return items.map((item) => {
+    if (item.type === 'feed' && item.bare_id === -1) {
+      return { ...item, unread: count }
+    }
+    if (item.type === 'category' && item.items) {
+      return { ...item, items: withStarredCount(item.items, count) }
+    }
+    return item
+  })
+}
+
 const treeWithUnread = computed(() => {
   const allArticlesFeed = findInTree(tree.value, -4)
   const virtual: ApiFeedTreeItem = {
@@ -162,7 +182,9 @@ const treeWithUnread = computed(() => {
     icon: false,
     viewMode: 'unread',
   }
-  return insertAfter(tree.value, -4, virtual)
+  const withVirtual = insertAfter(tree.value, -4, virtual)
+  const starredTotal = Math.max(0, starredCount.value + articlesStore.starredCountDelta)
+  return withStarredCount(withVirtual, starredTotal)
 })
 
 const organizedTree = computed((): TreeRow[] => {

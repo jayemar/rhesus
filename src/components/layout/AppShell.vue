@@ -137,7 +137,11 @@
               >{{ selectedArticle.title }}</h1>
               <div class="reader-meta">
                 <span class="reader-meta-feed" @click="goToFeed(selectedArticle.feed_id)">{{ selectedArticle.feed_title }}</span>
-                <span v-if="selectedArticle.author">{{ selectedArticle.author }}</span>
+                <span
+                  v-if="selectedArticle.author"
+                  class="reader-meta-author"
+                  @click="searchAuthor(selectedArticle.author, selectedArticle.feed_title)"
+                >{{ selectedArticle.author }}</span>
                 <span>{{ formatArticleDate(selectedArticle.updated) }}</span>
                 <span v-if="readingTime(selectedArticle.content) > 0">
                   {{ readingTime(selectedArticle.content) }} min read
@@ -191,7 +195,7 @@ import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { browserShowsNativeToast } from '@/utils/clipboard'
-import type { ApiFeedTreeItem } from '@/types/api'
+import type { ApiFeedTreeItem, UiSettings } from '@/types/api'
 
 const appVersion = __APP_VERSION__
 const buildDate = __BUILD_DATE__
@@ -229,6 +233,14 @@ const baseServerUnread = ref(0)
 watchEffect(() => {
   const sel = selection.value
   if (!sel) { baseServerUnread.value = 0; return }
+  // Starred is a total-count feed (see feedsStore.starredCount), not an
+  // unread-count one like every other feed - the tree only ever carries
+  // unread-only counts from the server (see FeedTree.vue's withStarredCount
+  // for why), so this can't be read off `node.unread` the normal way.
+  if (sel.id === -1 && !sel.isCategory) {
+    baseServerUnread.value = feedsStore.starredCount
+    return
+  }
   const node = findInTree(tree.value, sel.id)
   if (node) {
     baseServerUnread.value = node.unread
@@ -236,9 +248,13 @@ watchEffect(() => {
   }
 })
 
-const unreadCount = computed(() =>
-  Math.max(0, baseServerUnread.value - articlesStore.readCountDelta)
-)
+const unreadCount = computed(() => {
+  const sel = selection.value
+  if (sel?.id === -1 && !sel.isCategory) {
+    return Math.max(0, baseServerUnread.value + articlesStore.starredCountDelta)
+  }
+  return Math.max(0, baseServerUnread.value - articlesStore.readCountDelta)
+})
 
 const authStore = useAuthStore()
 
@@ -441,6 +457,22 @@ function goToFeed(feedId: number) {
   historyPushed.value = false
   articlesStore.select(null)
   router.replace({ name: 'feed', params: { id: String(feedId) } })
+}
+
+// Browsers don't expose which search engine the user has set as default -
+// that's a browser-internal setting with no web API, for the same privacy
+// reasons a page can't read other browser settings - so this links to
+// whichever engine is chosen in Settings, rather than "the" default.
+const SEARCH_ENGINE_URLS: Record<UiSettings['search_engine'], string> = {
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  google: 'https://www.google.com/search?q=',
+  bing: 'https://www.bing.com/search?q=',
+}
+
+function searchAuthor(name: string, feedTitle?: string) {
+  const query = feedTitle ? `${name} ${feedTitle}` : name
+  const base = SEARCH_ENGINE_URLS[settingsStore.settings.search_engine]
+  window.open(`${base}${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer')
 }
 
 function selectionSiteUrl(): string | undefined {
@@ -981,6 +1013,15 @@ async function refresh() {
 }
 
 .reader-meta-feed:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.reader-meta-author {
+  cursor: pointer;
+}
+
+.reader-meta-author:hover {
   color: var(--color-text-primary);
   text-decoration: underline;
 }

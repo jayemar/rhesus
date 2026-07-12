@@ -41,20 +41,6 @@
                 @click="newFeedUrl = ''; feedChoices = null; addError = null; addSuccess = null"
               ><X :size="12" /></button>
             </div>
-            <select v-model.number="newFeedCatId" class="add-select" :disabled="adding">
-              <option :value="0">Uncategorized</option>
-              <option v-for="cat in userCategories" :key="cat.id" :value="cat.id">{{ cat.title }}</option>
-            </select>
-          </div>
-          <div class="add-row">
-            <input
-              v-model="newFeedNote"
-              class="add-input add-note-input"
-              type="text"
-              placeholder="Feed note (optional)"
-              :disabled="adding"
-              @keydown.enter.prevent="submitAddFeed"
-            />
             <button class="add-btn" :disabled="!newFeedUrl.trim() || adding" @click="submitAddFeed">
               <Loader2 v-if="adding" :size="14" class="spinning" />
               <Plus v-else :size="14" />
@@ -81,7 +67,7 @@
       <section class="list-section">
         <div class="list-header">
           <h3>Feeds{{ feeds.length ? ` (${filteredFeeds.length})` : '' }}</h3>
-          <div v-if="feeds.length" class="search-input-wrap">
+          <div class="search-input-wrap">
             <input
               v-model="searchQuery"
               class="search-input"
@@ -244,16 +230,28 @@
       @confirm="doDelete"
       @cancel="feedToDelete = null"
     />
+
+    <FeedPreviewDialog
+      v-if="previewUrl"
+      :loading="previewLoading"
+      :error="previewError"
+      :preview="previewData"
+      :categories="userCategories"
+      @confirm="confirmAddFeed"
+      @cancel="cancelPreview"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, ExternalLink, X, Loader2, ChevronDown, ChevronRight, AlertCircle, StickyNote, Rss } from 'lucide-vue-next'
-import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl, refreshFeed, getFeedNotes, uploadFeedIcon, removeFeedIcon } from '@/api/feeds'
+import { getAllFeeds, getAllCategories, deleteFeed, addFeed, editFeed, importOpml, resolveSubscribeUrl, previewFeed, refreshFeed, getFeedNotes, uploadFeedIcon, removeFeedIcon } from '@/api/feeds'
+import type { FeedPreview } from '@/api/feeds'
 import { ApiError } from '@/api/client'
-import { useFeedsStore } from '@/stores/feeds'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import FeedPreviewDialog from '@/components/feeds/FeedPreviewDialog.vue'
+import { useFeedsStore } from '@/stores/feeds'
 import type { ApiFeed, ApiCategory } from '@/types/api'
 
 const feedsStore = useFeedsStore()
@@ -286,12 +284,15 @@ const ALLOWED_ICON_MIME_TYPES = new Set([
 ])
 
 const newFeedUrl = ref('')
-const newFeedCatId = ref(0)
-const newFeedNote = ref('')
 const adding = ref(false)
 const addError = ref<string | null>(null)
 const addSuccess = ref<string | null>(null)
 const feedChoices = ref<Record<string, string> | null>(null)
+
+const previewUrl = ref<string | null>(null)
+const previewLoading = ref(false)
+const previewError = ref<string | null>(null)
+const previewData = ref<FeedPreview | null>(null)
 
 const feedToDelete = ref<ApiFeed | null>(null)
 const expandedErrorId = ref<number | null>(null)
@@ -518,23 +519,22 @@ async function doDelete() {
   feedsStore.loadTree()
 }
 
-async function subscribeToUrl(feedUrl: string) {
+async function subscribeToUrl(feedUrl: string, catId = 0, note = '') {
   adding.value = true
   addError.value = null
   addSuccess.value = null
   feedChoices.value = null
   try {
-    const result = await addFeed(feedUrl, newFeedCatId.value)
+    const result = await addFeed(feedUrl, catId)
     if (result.code === 0) {
       addError.value = 'Already subscribed to that feed.'
     } else if (result.code === 1) {
-      const note = newFeedNote.value.trim()
-      if (note && result.feed_id) {
-        await editFeed(result.feed_id, { note })
-        feedNotes.value[result.feed_id] = note
+      const trimmedNote = note.trim()
+      if (trimmedNote && result.feed_id) {
+        await editFeed(result.feed_id, { note: trimmedNote })
+        feedNotes.value[result.feed_id] = trimmedNote
       }
       newFeedUrl.value = ''
-      newFeedNote.value = ''
       addSuccess.value = `Feed added successfully: ${feedUrl}`
       setTimeout(() => { addSuccess.value = null }, 4000)
       await load()
@@ -558,8 +558,46 @@ async function subscribeToUrl(feedUrl: string) {
   }
 }
 
+async function startPreview(url: string) {
+  previewUrl.value = url
+  previewLoading.value = true
+  previewError.value = null
+  previewData.value = null
+  try {
+    previewData.value = await previewFeed(url)
+  } catch (e) {
+    if (e instanceof ApiError) {
+      const messages: Record<string, string> = {
+        'FETCH_FAILED':   'Could not fetch this feed.',
+        'PARSE_FAILED':   'This does not look like a valid RSS/Atom feed.',
+        'INVALID_URL':    'Invalid URL (must be http/https on a standard port, and not a private address).',
+        'MISSING_URL':    'No URL provided.',
+        'NOT_LOGGED_IN':  'Not logged in - please refresh and try again.',
+        'API_DISABLED':   'API access is not enabled for this account.',
+      }
+      previewError.value = messages[e.code] ?? `Failed to preview feed: ${e.code}`
+    } else {
+      previewError.value = e instanceof Error ? e.message : 'Failed to preview feed.'
+    }
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function cancelPreview() {
+  previewUrl.value = null
+  previewData.value = null
+  previewError.value = null
+}
+
+async function confirmAddFeed(catId: number, note: string) {
+  const url = previewUrl.value
+  cancelPreview()
+  if (url) await subscribeToUrl(url, catId, note)
+}
+
 async function selectFeedChoice(url: string) {
-  await subscribeToUrl(url)
+  await startPreview(url)
 }
 
 async function submitAddFeed() {
@@ -571,9 +609,7 @@ async function submitAddFeed() {
   feedChoices.value = null
   try {
     const resolved = await resolveSubscribeUrl(url)
-    const resolvedNote = resolved.url !== url ? ` (tried: ${resolved.url})` : ''
-    await subscribeToUrl(resolved.url)
-    if (addError.value && resolvedNote) addError.value = addError.value + resolvedNote
+    await startPreview(resolved.url)
   } catch (e) {
     if (e instanceof ApiError) {
       const messages: Record<string, string> = {
@@ -741,12 +777,6 @@ h3 {
   border-color: var(--color-accent);
 }
 
-.add-note-input {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 10px;
-}
-
 .add-clear-btn {
   position: absolute;
   right: 6px;
@@ -763,16 +793,6 @@ h3 {
   color: var(--color-text-primary);
 }
 
-.add-select {
-  padding: 7px 8px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  flex-shrink: 0;
-  max-width: 140px;
-}
 
 .add-btn {
   width: 34px;

@@ -2,6 +2,12 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* Without this, mobile Chrome/Safari's native tap-highlight overlay can
+     get stuck showing on an element after a touch-then-scroll gesture
+     (touchstart followed by touchmove past the scroll threshold, rather
+     than a clean tap) - most visible on article cards, which are tall,
+     frequently-scrolled tap targets. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body {

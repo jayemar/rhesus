@@ -109,6 +109,7 @@ export interface UiSettings {
   date_sort: 'retrieval' | 'publication'
   load_on_startup: boolean
   poll_interval: number
+  search_engine: 'duckduckgo' | 'google' | 'bing'
 }
 
 export interface ApiFilterRule {
@@ -154,4 +155,5 @@ export const DEFAULT_SETTINGS: UiSettings = {
   date_sort: 'retrieval',
   load_on_startup: false,
   poll_interval: 0,
+  search_engine: 'duckduckgo',
 }

@@ -97,6 +97,14 @@
             <option value="copy_markdown">Copy as markdown link</option>
           </select>
         </label>
+        <label class="select-row">
+          <span>Search engine (for author search)</span>
+          <select v-model="s.search_engine">
+            <option value="duckduckgo">DuckDuckGo</option>
+            <option value="google">Google</option>
+            <option value="bing">Bing</option>
+          </select>
+        </label>
       </section>
     </div>
 

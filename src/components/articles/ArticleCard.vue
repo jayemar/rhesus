@@ -371,8 +371,13 @@ function goToFeed(feedId: number) {
   touch-action: pan-y;
 }
 
-.card-content:hover {
-  background: var(--color-surface-raised);
+/* hover: hover excludes touch-only devices, where :hover triggers on touch
+   and doesn't reliably clear afterward - it can otherwise look identical to
+   this bug's other cause (see base.css's -webkit-tap-highlight-color fix). */
+@media (hover: hover) {
+  .card-content:hover {
+    background: var(--color-surface-raised);
+  }
 }
 
 .card.selected {
@@ -419,9 +424,11 @@ img.feed-icon {
   cursor: pointer;
 }
 
-.feed-name:hover {
-  color: var(--color-text-primary);
-  text-decoration: underline;
+@media (hover: hover) {
+  .feed-name:hover {
+    color: var(--color-text-primary);
+    text-decoration: underline;
+  }
 }
 
 .card-right {

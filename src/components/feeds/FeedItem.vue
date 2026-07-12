@@ -17,7 +17,7 @@
     />
     <Rss v-else class="feed-icon feed-icon--placeholder" :size="14" />
     <span class="feed-title">{{ item.name }}</span>
-    <span v-if="item.unread > 0" class="feed-unread">{{ item.unread }}</span>
+    <span v-if="item.unread > 0 || alwaysShowCount" class="feed-unread">{{ item.unread }}</span>
   </button>
 </template>
 
@@ -30,6 +30,7 @@ const props = defineProps<{
   item: ApiFeedTreeItem
   selected: boolean
   deletable?: boolean
+  alwaysShowCount?: boolean
 }>()
 
 const emit = defineEmits<{ select: []; 'long-press': [] }>()

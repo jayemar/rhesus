@@ -225,6 +225,7 @@
         :style="morePopupStyle"
         @click.stop
       >
+        <button v-if="article.link" class="share-option" @click="openInNewTab">Open in new tab</button>
         <button
           class="share-option share-option--font"
           :style="{ fontFamily: currentFont.fontFamily }"
@@ -803,6 +804,11 @@ function openMoreMenu(event: MouseEvent) {
   showMoreMenu.value = true
 }
 
+function openInNewTab() {
+  showMoreMenu.value = false
+  if (props.article.link) window.open(props.article.link, '_blank', 'noopener,noreferrer')
+}
+
 function promptUnsubscribe() {
   showMoreMenu.value = false
   feedToUnsubscribe.value = { id: props.article.feed_id, title: props.article.feed_title ?? 'this feed' }
@@ -826,8 +832,11 @@ async function nativeShare() {
       title: props.article.title ?? undefined,
       url: props.article.link ?? undefined,
     })
-  } catch {
-    // user cancelled or share failed - no feedback needed
+  } catch (e) {
+    // AbortError = user backed out of the share sheet, not a failure
+    if (e instanceof Error && e.name === 'AbortError') return
+    console.error('navigator.share failed:', e)
+    emit('copied', 'Share failed - see console for details')
   }
 }
 
@@ -1038,6 +1047,79 @@ function resolveRelativeUrls(doc: Document, baseUrl: string | undefined): void {
   })
 }
 
+// Pull quotes are an editorial/typographic device (usually a sentence
+// repeated from the surrounding body text, set apart for emphasis) rather
+// than a real quotation - there's no HTML5 semantic element for them the
+// way <blockquote> covers actual quotes. The de facto convention across
+// CMSs is a class name containing some form of "pull quote", so that's the
+// only generally reliable signal available.
+function markPullQuotes(doc: Document) {
+  doc.querySelectorAll('[class*="pull-quote" i], [class*="pullquote" i], [class*="pull_quote" i]').forEach((el) => {
+    // A bare <span> match is usually centered inside a wrapping <p> (e.g.
+    // Tricycle: <p style="text-align:center"><span class="pull-quote">...).
+    // Marking the <span> itself would only box the inline text, not the
+    // paragraph - style the wrapping block instead when there is one.
+    const target = el.tagName === 'SPAN' ? (el.closest('p') ?? el) : el
+    target.classList.add('rhesus-pull-quote')
+  })
+}
+
+// Social embed widgets (Instagram, TikTok, Facebook, etc.) ship as an empty
+// placeholder element plus a <script> that a real browser on the origin
+// site uses to fetch and render the actual embed client-side. That script
+// never runs here (DOMPurify strips it, and tracker-blockers like Privacy
+// Badger would block it anyway even if it did), so the placeholder renders
+// as a blank box. Must run before DOMPurify.sanitize() - the permalink is
+// usually itself a data-* attribute, which DOMPurify strips by default.
+function fallbackEmptyEmbeds(doc: Document) {
+  const selector = [
+    'blockquote.instagram-media',
+    'blockquote.twitter-tweet',
+    'blockquote.tiktok-embed',
+    'blockquote.fb-xfbml-parse-ignore',
+    'div.fb-video',
+    'div.fb-post',
+  ].join(',')
+  doc.querySelectorAll(selector).forEach((el) => {
+    // Some platforms (Twitter's static fallback markup, most TikTok embeds)
+    // already include real, readable text - leave those alone entirely.
+    if (el.textContent?.trim()) return
+    const url =
+      el.getAttribute('data-instgrm-permalink') ||
+      el.getAttribute('cite') ||
+      el.getAttribute('data-href') ||
+      el.querySelector('a[href]')?.getAttribute('href') ||
+      null
+    if (!url) {
+      const note = doc.createElement('p')
+      note.className = 'rhesus-embed-removed'
+      note.textContent = 'Embedded content removed - open the original article to view it.'
+      el.replaceWith(note)
+      return
+    }
+    const link = doc.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('target', '_blank')
+    link.setAttribute('rel', 'noopener noreferrer')
+    link.className = 'rhesus-embed-fallback'
+    link.textContent = `View on ${embedPlatformName(url)} ↗`
+    el.replaceWith(link)
+  })
+}
+
+function embedPlatformName(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '')
+    if (host.includes('instagram')) return 'Instagram'
+    if (host.includes('tiktok')) return 'TikTok'
+    if (host === 'x.com' || host.includes('twitter')) return 'X'
+    if (host.includes('facebook')) return 'Facebook'
+    return host
+  } catch {
+    return 'original post'
+  }
+}
+
 function processContent(html: string): string {
   // Preprocess before DOMPurify strips data-* attributes: move data-caption
   // into alt (for lightbox) and figcaption (for below-image display) when empty.
@@ -1048,6 +1130,7 @@ function processContent(html: string): string {
       el.remove()
   })
   resolveRelativeUrls(pre, props.article.link ?? undefined)
+  fallbackEmptyEmbeds(pre)
   pre.querySelectorAll('img[data-caption]').forEach(img => {
     const dc = img.getAttribute('data-caption') ?? ''
     const dcText = stripHtml(dc)
@@ -1067,6 +1150,7 @@ function processContent(html: string): string {
   })
   const sanitized = DOMPurify.sanitize(pre.body.innerHTML)
   const doc = new DOMParser().parseFromString(sanitized, 'text/html')
+  markPullQuotes(doc)
   doc.querySelectorAll('table').forEach(table => {
     const wrapper = doc.createElement('div')
     wrapper.className = 'table-scroll'
@@ -1272,6 +1356,48 @@ watch(
   border-radius: 0 4px 4px 0;
   font-style: italic;
   color: var(--color-text-secondary);
+}
+
+/* Pull quotes are typographic emphasis (often a sentence repeated from the
+   surrounding body), not a real quotation like <blockquote> - top/bottom
+   rules instead of a left border keeps the two visually distinct. */
+.reader-content :deep(.rhesus-pull-quote) {
+  display: block;
+  text-align: center;
+  font-size: 1.2em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-accent);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.9em 0.5em;
+  margin: 0 0 1.1em;
+}
+
+.reader-content :deep(.rhesus-embed-fallback) {
+  display: block;
+  text-align: center;
+  padding: 0.9em 1em;
+  margin: 0 0 1.1em;
+  background: rgba(128, 128, 128, 0.08);
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* Unlike .rhesus-embed-fallback, this isn't a link - no permalink could be
+   found, so it's muted/italic rather than accent-colored, to not look
+   tappable when it isn't. */
+.reader-content :deep(.rhesus-embed-removed) {
+  text-align: center;
+  padding: 0.9em 1em;
+  margin: 0 0 1.1em;
+  background: rgba(128, 128, 128, 0.08);
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-style: italic;
 }
 
 .reader-content :deep(.table-scroll) {

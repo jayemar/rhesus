@@ -42,12 +42,23 @@ export const useFeedsStore = defineStore('feeds', () => {
     labelCounts.value = await getLabelCounts()
   }
 
+  // Applies an immediate local adjustment when a label is assigned/removed
+  // from an article, so the sidebar count doesn't sit stale until the next
+  // full loadTree() - mirrors why starredCountDelta exists, just applied
+  // directly to the map since there's no separate "authoritative total" ref
+  // to reconcile against here (the next loadLabelCounts() simply overwrites
+  // this wholesale with fresh server data).
+  function adjustLabelCount(labelId: number, delta: number) {
+    const current = labelCounts.value[labelId] ?? 0
+    labelCounts.value[labelId] = Math.max(0, current + delta)
+  }
+
   function select(item: FeedSelection) {
     selection.value = item
   }
 
   return {
     tree, selection, loading, starredCount, labelCounts,
-    loadTree, loadStarredCount, loadLabelCounts, select,
+    loadTree, loadStarredCount, loadLabelCounts, adjustLabelCount, select,
   }
 })

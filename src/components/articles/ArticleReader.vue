@@ -15,8 +15,8 @@
         title="Toggle star"
         @click.stop="articlesStore.toggleStar(article.id)"
       ><Star :size="16" /></button>
-      <button class="tb-btn" :class="{ active: articleHasLabels }" title="Labels" @click.stop="openTagMenu">
-        <Tag :size="16" />
+      <button class="tb-btn" :class="{ active: articleHasLabels }" title="Labels" @click.stop="openLabelMenu">
+        <TagIcon :size="16" />
       </button>
       <button
         class="tb-btn note-btn"
@@ -65,8 +65,8 @@
             class="tb-btn"
             :class="{ active: articleHasLabels }"
             title="Labels"
-            @click.stop="openTagMenu"
-          ><Tag :size="16" /></button>
+            @click.stop="openLabelMenu"
+          ><TagIcon :size="16" /></button>
           <button
             class="tb-btn note-btn"
             :class="{ active: currentNote }"
@@ -169,28 +169,28 @@
         />
         <p v-if="lightboxAlt" class="lightbox-caption">{{ lightboxAlt }}</p>
       </div>
-      <div v-if="showTagMenu" class="share-backdrop" @click="showTagMenu = false" />
+      <div v-if="showLabelMenu" class="share-backdrop" @click="showLabelMenu = false" />
       <div
-        v-if="showTagMenu"
-        class="tag-popup"
-        :style="tagPopupStyle"
+        v-if="showLabelMenu"
+        class="label-popup"
+        :style="labelPopupStyle"
         @click.stop
       >
-        <div v-if="loadingLabels" class="tag-status">Loading...</div>
+        <div v-if="loadingLabels" class="label-status">Loading...</div>
         <button
           v-for="label in labelList"
           :key="label.id"
-          class="tag-option"
+          class="label-option"
           @click="toggleLabel(label)"
         >
-          <span class="tag-dot" :style="{ background: label.bg_color || 'var(--color-text-muted)' }" />
-          <span class="tag-name">{{ label.caption }}</span>
-          <Check v-if="label.checked" :size="13" class="tag-check" />
+          <span class="label-dot" :style="{ background: label.bg_color || 'var(--color-text-muted)' }" />
+          <span class="label-name">{{ label.caption }}</span>
+          <Check v-if="label.checked" :size="13" class="label-check" />
         </button>
-        <div class="tag-new">
+        <div class="label-new">
           <input
             v-model="newLabelName"
-            class="tag-new-input"
+            class="label-new-input"
             placeholder="New label..."
             maxlength="64"
             @keydown.enter.prevent="addLabel"
@@ -198,7 +198,7 @@
             @click.stop
           />
           <button
-            class="tag-new-btn"
+            class="label-new-btn"
             :disabled="!newLabelName.trim() || creatingLabel"
             @click.stop="addLabel"
           >
@@ -275,7 +275,7 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { Readability } from '@mozilla/readability'
-import { Mail, MailOpen, Star, Tag, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag as TagIcon, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
@@ -710,9 +710,9 @@ const feedToUnsubscribe = ref<{ id: number; title: string } | null>(null)
 const fullContent = ref<string | null>(null)
 const fetchingFull = ref(false)
 
-const showTagMenu = ref(false)
-const tagBtn = ref<HTMLElement | null>(null)
-const tagPopupStyle = ref<Record<string, string>>({})
+const showLabelMenu = ref(false)
+const labelBtn = ref<HTMLElement | null>(null)
+const labelPopupStyle = ref<Record<string, string>>({})
 const labelList = ref<ApiLabel[]>([])
 const loadingLabels = ref(false)
 const labelsLoaded = ref(false)
@@ -724,17 +724,17 @@ const articleHasLabels = computed(() => {
   return (props.article.labels?.length ?? 0) > 0
 })
 
-async function openTagMenu(event: MouseEvent) {
+async function openLabelMenu(event: MouseEvent) {
   showShareMenu.value = false
-  if (showTagMenu.value) {
-    showTagMenu.value = false
+  if (showLabelMenu.value) {
+    showLabelMenu.value = false
     return
   }
-  tagBtn.value = event.currentTarget as HTMLElement
-  if (tagBtn.value) {
-    tagPopupStyle.value = anchorPopupStyle(tagBtn.value.getBoundingClientRect(), 220)
+  labelBtn.value = event.currentTarget as HTMLElement
+  if (labelBtn.value) {
+    labelPopupStyle.value = anchorPopupStyle(labelBtn.value.getBoundingClientRect(), 220)
   }
-  showTagMenu.value = true
+  showLabelMenu.value = true
   loadingLabels.value = true
   labelsLoaded.value = false
   try {
@@ -768,6 +768,7 @@ async function addLabel() {
       labelList.value.push({ id: result.id, caption: result.caption, fg_color: '', bg_color: '', checked: true })
     }
     syncLabelsToStore()
+    feedsStore.adjustLabelCount(result.id, 1)
     newLabelName.value = ''
   } finally {
     creatingLabel.value = false
@@ -780,13 +781,14 @@ async function toggleLabel(label: ApiLabel) {
   try {
     await setArticleLabel(props.article.id, label.id, next)
     syncLabelsToStore()
+    feedsStore.adjustLabelCount(label.id, next ? 1 : -1)
   } catch {
     label.checked = !next
   }
 }
 
 function openShareMenu(event: MouseEvent) {
-  showTagMenu.value = false
+  showLabelMenu.value = false
   shareBtn.value = event.currentTarget as HTMLElement
   if (shareBtn.value) {
     sharePopupStyle.value = anchorPopupStyle(shareBtn.value.getBoundingClientRect(), 200)
@@ -1485,7 +1487,7 @@ watch(
   fill: currentColor;
 }
 
-:global(.tag-popup) {
+:global(.label-popup) {
   position: fixed;
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
@@ -1497,13 +1499,13 @@ watch(
   overflow-y: auto;
 }
 
-:global(.tag-status) {
+:global(.label-status) {
   padding: 12px 16px;
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 
-:global(.tag-option) {
+:global(.label-option) {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1515,27 +1517,27 @@ watch(
   transition: background var(--transition-fast);
 }
 
-:global(.tag-option:hover) {
+:global(.label-option:hover) {
   background: var(--color-surface);
 }
 
-:global(.tag-dot) {
+:global(.label-dot) {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-:global(.tag-name) {
+:global(.label-name) {
   flex: 1;
 }
 
-:global(.tag-check) {
+:global(.label-check) {
   color: var(--color-accent);
   flex-shrink: 0;
 }
 
-:global(.tag-new) {
+:global(.label-new) {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1543,7 +1545,7 @@ watch(
   border-top: 1px solid var(--color-border);
 }
 
-:global(.tag-new-input) {
+:global(.label-new-input) {
   flex: 1;
   background: transparent;
   border: none;
@@ -1553,11 +1555,11 @@ watch(
   padding: 4px 6px;
 }
 
-:global(.tag-new-input::placeholder) {
+:global(.label-new-input::placeholder) {
   color: var(--color-text-muted);
 }
 
-:global(.tag-new-btn) {
+:global(.label-new-btn) {
   width: 28px;
   height: 28px;
   display: flex;
@@ -1569,11 +1571,11 @@ watch(
   transition: background var(--transition-fast);
 }
 
-:global(.tag-new-btn:hover:not(:disabled)) {
+:global(.label-new-btn:hover:not(:disabled)) {
   background: var(--color-surface);
 }
 
-:global(.tag-new-btn:disabled) {
+:global(.label-new-btn:disabled) {
   color: var(--color-text-muted);
   cursor: default;
 }

@@ -39,7 +39,7 @@
       <div class="card-right">
         <div class="card-right-top">
           <Star v-if="article.marked" class="star-badge" :size="11" aria-label="Starred" />
-          <Tag v-if="article.labels && article.labels.length" class="label-badge" :size="11" aria-label="Labelled" />
+          <TagIcon v-if="article.labels && article.labels.length" class="label-badge" :size="11" aria-label="Labelled" />
           <span class="timestamp">{{ articleDate }}</span>
         </div>
         <div v-if="showThumbs && thumbUrl" class="card-thumb">
@@ -54,7 +54,7 @@
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { Star, Check, Rss, Tag } from 'lucide-vue-next'
+import { Star, Check, Rss, Tag as TagIcon } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'

@@ -30,6 +30,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("resolveSubscribeUrl", $this);
         $host->add_api_method("previewFeed", $this);
         $host->add_api_method("getStarredCount", $this);
+        $host->add_api_method("getLabelCounts", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
         $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
     }
@@ -389,6 +390,30 @@ class Rhesus_Settings extends Plugin {
         $sth->execute([$uid]);
         $row = $sth->fetch();
         return [0, ["count" => (int)($row['count'] ?? 0)]];
+    }
+
+    // Total (read + unread) article count per label for the current user,
+    // keyed by label DB id. Mirrors getStarredCount(): native TT-RSS's
+    // getFeedTree/getCounters only ever report unread-only counts for
+    // labels (like every other feed), so this fills the same gap.
+    public function getLabelCounts(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $sth = Db::pdo()->prepare(
+            "SELECT l.id AS label_id, COUNT(ul.article_id) AS count
+             FROM ttrss_labels2 l
+             LEFT JOIN ttrss_user_labels2 ul ON ul.label_id = l.id
+             WHERE l.owner_uid = ?
+             GROUP BY l.id"
+        );
+        $sth->execute([$uid]);
+        $counts = [];
+        foreach ($sth->fetchAll() as $row) {
+            $counts[(int)$row['label_id']] = (int)$row['count'];
+        }
+        return [0, ["counts" => $counts]];
     }
 
     // Removes a feed's custom icon, restoring core's normal auto-detected

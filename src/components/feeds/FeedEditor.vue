@@ -29,6 +29,8 @@
                 placeholder="https://example.com/feed.xml"
                 autocomplete="off"
                 autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
                 :disabled="adding"
                 @keydown.enter.prevent="submitAddFeed"
               />
@@ -196,7 +198,16 @@
                   <p v-if="iconError && editingId === feed.id" class="add-error">{{ iconError }}</p>
                   <input v-model="editTitle" class="edit-input" placeholder="Title" maxlength="250" />
                   <div class="edit-url-row">
-                    <input v-model="editFeedUrl" class="edit-input edit-url-input" type="url" placeholder="Feed URL" />
+                    <input
+                      v-model="editFeedUrl"
+                      class="edit-input edit-url-input"
+                      type="url"
+                      placeholder="Feed URL"
+                      autocomplete="off"
+                      autocapitalize="off"
+                      autocorrect="off"
+                      spellcheck="false"
+                    />
                     <a class="edit-url-link" :href="editFeedUrl || undefined" target="_blank" rel="noopener noreferrer" title="Open feed URL" :tabindex="editFeedUrl ? 0 : -1">
                       <ExternalLink :size="13" />
                     </a>

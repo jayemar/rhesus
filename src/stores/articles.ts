@@ -146,8 +146,8 @@ export const useArticlesStore = defineStore('articles', () => {
     }
   }
 
-  async function appendNew() {
-    if (!articles.value.length || currentFeedId.value === null) return
+  async function appendNew(): Promise<number> {
+    if (!articles.value.length || currentFeedId.value === null) return 0
     const sinceId = articles.value.reduce((max, a) => Math.max(max, a.id), 0)
     loadingMore.value = true
     try {
@@ -161,12 +161,14 @@ export const useArticlesStore = defineStore('articles', () => {
         dateSort: settingsStore.settings.date_sort,
         sinceId,
       })
-      if (results.length > 0) {
-        const existingIds = new Set(articles.value.map((a) => a.id))
-        articles.value.push(...results.filter((a) => !existingIds.has(a.id)))
-      }
+      if (results.length === 0) return 0
+      const existingIds = new Set(articles.value.map((a) => a.id))
+      const newOnes = results.filter((a) => !existingIds.has(a.id))
+      articles.value.push(...newOnes)
+      return newOnes.length
     } catch (err) {
       console.error('appendNew failed', err)
+      return 0
     } finally {
       loadingMore.value = false
     }

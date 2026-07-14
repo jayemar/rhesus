@@ -109,14 +109,15 @@ const router = useRouter()
 const route = useRoute()
 const feedsStore = useFeedsStore()
 const articlesStore = useArticlesStore()
-const { tree, starredCount } = storeToRefs(feedsStore)
+const { tree, starredCount, labelCounts } = storeToRefs(feedsStore)
 
 const openCats = ref<Set<number>>(new Set())
 const labelToDelete = ref<ApiFeedTreeItem | null>(null)
 
-// TT-RSS label feed_id = -1024 - label_db_id, so label_db_id = -(bare_id + 1024)
+// TT-RSS label feed_id = LABEL_BASE_INDEX - 1 - label_db_id = -1025 - label_db_id
+// (classes/Labels.php::label_to_feed_id), so label_db_id = -(bare_id + 1025).
 function labelDbId(bareId: number): number {
-  return -(bareId + 1024)
+  return -(bareId + 1025)
 }
 
 async function confirmDeleteLabel() {
@@ -171,6 +172,22 @@ function withStarredCount(items: ApiFeedTreeItem[], count: number): ApiFeedTreeI
   })
 }
 
+// Replaces each label's unread count with its TOTAL article count instead -
+// same rationale as withStarredCount above, since native TT-RSS only ever
+// reports unread-only counts for labels too.
+function withLabelCounts(items: ApiFeedTreeItem[], counts: Record<number, number>): ApiFeedTreeItem[] {
+  return items.map((item) => {
+    if (item.type === 'feed' && item.bare_id <= -1025) {
+      const count = counts[labelDbId(item.bare_id)]
+      if (count !== undefined) return { ...item, unread: count }
+    }
+    if (item.type === 'category' && item.items) {
+      return { ...item, items: withLabelCounts(item.items, counts) }
+    }
+    return item
+  })
+}
+
 const treeWithUnread = computed(() => {
   const allArticlesFeed = findInTree(tree.value, -4)
   const virtual: ApiFeedTreeItem = {
@@ -184,7 +201,7 @@ const treeWithUnread = computed(() => {
   }
   const withVirtual = insertAfter(tree.value, -4, virtual)
   const starredTotal = Math.max(0, starredCount.value + articlesStore.starredCountDelta)
-  return withStarredCount(withVirtual, starredTotal)
+  return withLabelCounts(withStarredCount(withVirtual, starredTotal), labelCounts.value)
 })
 
 const organizedTree = computed((): TreeRow[] => {

@@ -31,6 +31,7 @@
       <div class="card-body">
         <div class="card-meta">
           <span class="feed-name" @click.stop="goToFeed(article.feed_id)">{{ article.feed_title }}</span>
+          <span v-if="linkDomain" class="link-domain" @click.stop="openLinkDomain">{{ linkDomain }}</span>
         </div>
         <h2 class="card-title">{{ article.title }}</h2>
         <p v-if="showExcerpt && truncatedExcerpt" class="card-excerpt">{{ truncatedExcerpt }}</p>
@@ -58,6 +59,7 @@ import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'
 import { writeToClipboard } from '@/utils/clipboard'
+import { externalLinkDomain, originOf } from '@/utils/url'
 import type { ApiArticle } from '@/types/api'
 
 const props = defineProps<{
@@ -72,6 +74,8 @@ const router = useRouter()
 const settingsStore = useSettingsStore()
 const articlesStore = useArticlesStore()
 const { settings } = storeToRefs(settingsStore)
+const linkDomain = computed(() => externalLinkDomain(props.article.link, props.article.site_url))
+
 const showExcerpt = computed(() => settings.value.excerpt_lines > 0)
 const showThumbs = computed(() => settings.value.show_thumbnails)
 const excerptLines = computed(() => settings.value.excerpt_lines)
@@ -327,7 +331,12 @@ function onCardClick() {
 }
 
 function goToFeed(feedId: number) {
-  router.replace({ name: 'feed', params: { id: String(feedId) } })
+  router.push({ name: 'feed', params: { id: String(feedId) } })
+}
+
+function openLinkDomain() {
+  const origin = originOf(props.article.link)
+  if (origin) window.open(origin, '_blank', 'noopener,noreferrer')
 }
 </script>
 
@@ -420,15 +429,22 @@ img.feed-icon {
   margin-bottom: 4px;
 }
 
-.feed-name {
+.feed-name,
+.link-domain {
   cursor: pointer;
 }
 
 @media (hover: hover) {
-  .feed-name:hover {
+  .feed-name:hover,
+  .link-domain:hover {
     color: var(--color-text-primary);
     text-decoration: underline;
   }
+}
+
+.card-meta span + span::before {
+  content: ' \B7 ';
+  padding: 0 2px;
 }
 
 .card-right {

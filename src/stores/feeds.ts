@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getFeedTree, getStarredCount } from '@/api/feeds'
+import { getFeedTree, getStarredCount, getLabelCounts } from '@/api/feeds'
 import type { ApiFeedTreeItem } from '@/types/api'
 import { useArticlesStore } from './articles'
 
@@ -16,6 +16,7 @@ export const useFeedsStore = defineStore('feeds', () => {
   const selection = ref<FeedSelection | null>(null)
   const loading = ref(false)
   const starredCount = ref(0)
+  const labelCounts = ref<Record<number, number>>({})
 
   async function loadTree() {
     loading.value = true
@@ -24,7 +25,7 @@ export const useFeedsStore = defineStore('feeds', () => {
     } finally {
       loading.value = false
     }
-    await loadStarredCount()
+    await Promise.all([loadStarredCount(), loadLabelCounts()])
   }
 
   // starredCount is the authoritative server total; articlesStore's
@@ -37,9 +38,16 @@ export const useFeedsStore = defineStore('feeds', () => {
     useArticlesStore().starredCountDelta = 0
   }
 
+  async function loadLabelCounts() {
+    labelCounts.value = await getLabelCounts()
+  }
+
   function select(item: FeedSelection) {
     selection.value = item
   }
 
-  return { tree, selection, loading, starredCount, loadTree, loadStarredCount, select }
+  return {
+    tree, selection, loading, starredCount, labelCounts,
+    loadTree, loadStarredCount, loadLabelCounts, select,
+  }
 })

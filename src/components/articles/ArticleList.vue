@@ -48,15 +48,18 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import { ChevronUp, Search, X } from 'lucide-vue-next'
 import { useFeedsStore } from '@/stores/feeds'
 import { useArticlesStore } from '@/stores/articles'
 import { useSettingsStore } from '@/stores/settings'
+import type { UiSettings } from '@/types/api'
 import ArticleCard from './ArticleCard.vue'
 
 const props = defineProps<{ showSearch?: boolean }>()
 const emit = defineEmits<{ copied: [label: string], 'close-search': [] }>()
 
+const router = useRouter()
 const feedsStore = useFeedsStore()
 const articlesStore = useArticlesStore()
 const settingsStore = useSettingsStore()
@@ -177,14 +180,46 @@ function isAtBottom(): boolean {
   return document.documentElement.scrollHeight - window.scrollY - window.innerHeight < 8
 }
 
+// Where to send the user when a pull-to-refresh finds no new articles.
+const EMPTY_REFRESH_TARGETS: Record<
+  Exclude<UiSettings['empty_refresh_target'], 'none'>,
+  { id: number; viewMode?: string }
+> = {
+  starred: { id: -1 },
+  unread: { id: -4, viewMode: 'unread' },
+  all_articles: { id: -4 },
+  published: { id: -2 },
+  recently_read: { id: -6 },
+}
+
+// Matches the option labels in SettingsPanel.vue's "empty_refresh_target" select.
+const EMPTY_REFRESH_TARGET_LABELS: Record<Exclude<UiSettings['empty_refresh_target'], 'none'>, string> = {
+  starred: 'Starred articles',
+  unread: 'Unread articles',
+  all_articles: 'All articles',
+  published: 'Published articles',
+  recently_read: 'Recently read',
+}
+
+function goToEmptyRefreshFallback() {
+  const target = settings.value.empty_refresh_target
+  if (target === 'none') return
+  const dest = EMPTY_REFRESH_TARGETS[target]
+  const sel = feedsStore.selection
+  if (sel && !sel.isCategory && sel.id === dest.id && (sel.viewMode ?? undefined) === dest.viewMode) return
+  router.replace({ name: 'feed', params: { id: String(dest.id) }, query: dest.viewMode ? { viewMode: dest.viewMode } : {} })
+  emit('copied', `No new articles. Showing ${EMPTY_REFRESH_TARGET_LABELS[target]}.`)
+}
+
 async function executePullAction() {
   pullUpDist.value = 0
   pullVisualPx.value = 0
   const sel = feedsStore.selection
   if (!sel || articlesStore.loading) return
   await articlesStore.markAllRead()
-  await articlesStore.appendNew()
+  const added = await articlesStore.appendNew()
   await feedsStore.loadTree()
+  if (added === 0) goToEmptyRefreshFallback()
 }
 
 let wheelAccum = 0

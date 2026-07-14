@@ -18,6 +18,11 @@ export async function getStarredCount(): Promise<number> {
   return res.count
 }
 
+export async function getLabelCounts(): Promise<Record<number, number>> {
+  const res = await call<{ counts: Record<number, number> }>('getLabelCounts')
+  return res.counts
+}
+
 export async function getAllCategories(): Promise<ApiCategory[]> {
   return call<ApiCategory[]>('getCategories', { include_empty: true })
 }

@@ -110,6 +110,7 @@ export interface UiSettings {
   load_on_startup: boolean
   poll_interval: number
   search_engine: 'duckduckgo' | 'google' | 'bing'
+  empty_refresh_target: 'none' | 'starred' | 'unread' | 'all_articles' | 'published' | 'recently_read'
 }
 
 export interface ApiFilterRule {
@@ -156,4 +157,5 @@ export const DEFAULT_SETTINGS: UiSettings = {
   load_on_startup: false,
   poll_interval: 0,
   search_engine: 'duckduckgo',
+  empty_refresh_target: 'starred',
 }

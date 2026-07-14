@@ -4,6 +4,71 @@
     <h2>Settings</h2>
     <div>
       <section>
+        <h3>Behaviour</h3>
+        <label class="toggle-row">
+          <span>Load unread articles on startup</span>
+          <input type="checkbox" v-model="s.load_on_startup" />
+        </label>
+        <label class="select-row">
+          <span>Check for new articles</span>
+          <select v-model.number="s.poll_interval">
+            <option :value="0">Manual refresh only</option>
+            <option :value="15">Every 15 minutes</option>
+            <option :value="30">Every 30 minutes</option>
+            <option :value="60">Every hour</option>
+            <option :value="120">Every 2 hours</option>
+          </select>
+        </label>
+        <label class="toggle-row">
+          <span>Mark as read on scroll</span>
+          <input type="checkbox" v-model="s.mark_on_scroll" />
+        </label>
+        <label class="select-row">
+          <span>Swipe right</span>
+          <select v-model="s.swipe_right_action">
+            <option value="none">None</option>
+            <option value="toggle_read">Toggle read</option>
+            <option value="toggle_starred">Toggle starred</option>
+          </select>
+        </label>
+        <label class="select-row">
+          <span>Swipe left</span>
+          <select v-model="s.swipe_left_action">
+            <option value="none">None</option>
+            <option value="toggle_read">Toggle read</option>
+            <option value="toggle_starred">Toggle starred</option>
+          </select>
+        </label>
+        <label class="select-row">
+          <span>Pull-to-refresh with nothing new, go to</span>
+          <select v-model="s.empty_refresh_target">
+            <option value="none">Stay on this list</option>
+            <option value="starred">Starred articles</option>
+            <option value="unread">Unread articles</option>
+            <option value="all_articles">All articles</option>
+            <option value="published">Published articles</option>
+            <option value="recently_read">Recently read</option>
+          </select>
+        </label>
+        <label class="select-row">
+          <span>Long press title</span>
+          <select v-model="s.long_press_title">
+            <option value="none">None</option>
+            <option value="copy_text">Copy article text</option>
+            <option value="copy_link">Copy link</option>
+            <option value="copy_markdown">Copy as markdown link</option>
+          </select>
+        </label>
+        <label class="select-row">
+          <span>Search engine (for author search)</span>
+          <select v-model="s.search_engine">
+            <option value="duckduckgo">DuckDuckGo</option>
+            <option value="google">Google</option>
+            <option value="bing">Bing</option>
+          </select>
+        </label>
+      </section>
+      <section>
         <h3>Display</h3>
         <label class="toggle-row">
           <span>Show thumbnails</span>
@@ -49,60 +114,6 @@
           <select v-model="s.date_sort">
             <option value="retrieval">Retrieval date</option>
             <option value="publication">Publication date</option>
-          </select>
-        </label>
-      </section>
-      <section>
-        <h3>Behaviour</h3>
-        <label class="toggle-row">
-          <span>Load unread articles on startup</span>
-          <input type="checkbox" v-model="s.load_on_startup" />
-        </label>
-        <label class="select-row">
-          <span>Check for new articles</span>
-          <select v-model.number="s.poll_interval">
-            <option :value="0">Manual refresh only</option>
-            <option :value="15">Every 15 minutes</option>
-            <option :value="30">Every 30 minutes</option>
-            <option :value="60">Every hour</option>
-            <option :value="120">Every 2 hours</option>
-          </select>
-        </label>
-        <label class="toggle-row">
-          <span>Mark as read on scroll</span>
-          <input type="checkbox" v-model="s.mark_on_scroll" />
-        </label>
-        <label class="select-row">
-          <span>Swipe right</span>
-          <select v-model="s.swipe_right_action">
-            <option value="none">None</option>
-            <option value="toggle_read">Toggle read</option>
-            <option value="toggle_starred">Toggle starred</option>
-          </select>
-        </label>
-        <label class="select-row">
-          <span>Swipe left</span>
-          <select v-model="s.swipe_left_action">
-            <option value="none">None</option>
-            <option value="toggle_read">Toggle read</option>
-            <option value="toggle_starred">Toggle starred</option>
-          </select>
-        </label>
-        <label class="select-row">
-          <span>Long press title</span>
-          <select v-model="s.long_press_title">
-            <option value="none">None</option>
-            <option value="copy_text">Copy article text</option>
-            <option value="copy_link">Copy link</option>
-            <option value="copy_markdown">Copy as markdown link</option>
-          </select>
-        </label>
-        <label class="select-row">
-          <span>Search engine (for author search)</span>
-          <select v-model="s.search_engine">
-            <option value="duckduckgo">DuckDuckGo</option>
-            <option value="google">Google</option>
-            <option value="bing">Bing</option>
           </select>
         </label>
       </section>

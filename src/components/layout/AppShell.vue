@@ -137,10 +137,11 @@
               >{{ selectedArticle.title }}</h1>
               <div class="reader-meta">
                 <span class="reader-meta-feed" @click="goToFeed(selectedArticle.feed_id)">{{ selectedArticle.feed_title }}</span>
+                <span v-if="readerLinkDomain" class="reader-meta-domain" @click="openLinkDomain">{{ readerLinkDomain }}</span>
                 <span
                   v-if="selectedArticle.author"
                   class="reader-meta-author"
-                  @click="searchAuthor(selectedArticle.author, selectedArticle.feed_title)"
+                  @click="searchAuthor(selectedArticle.author, readerLinkDomain ?? selectedArticle.feed_title)"
                 >{{ selectedArticle.author }}</span>
                 <span>{{ formatArticleDate(selectedArticle.updated) }}</span>
                 <span v-if="readingTime(selectedArticle.content) > 0">
@@ -195,6 +196,7 @@ import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { browserShowsNativeToast } from '@/utils/clipboard'
+import { externalLinkDomain, originOf } from '@/utils/url'
 import type { ApiFeedTreeItem, UiSettings } from '@/types/api'
 
 const appVersion = __APP_VERSION__
@@ -321,6 +323,15 @@ function readingTime(content: string | undefined): number {
 const selectedArticle = computed(() =>
   selectedId.value !== null ? articles.value.find((a) => a.id === selectedId.value) ?? null : null,
 )
+
+const readerLinkDomain = computed(() =>
+  selectedArticle.value ? externalLinkDomain(selectedArticle.value.link, selectedArticle.value.site_url) : null,
+)
+
+function openLinkDomain() {
+  const origin = originOf(selectedArticle.value?.link)
+  if (origin) window.open(origin, '_blank', 'noopener,noreferrer')
+}
 
 const isFullscreen = ref(!!document.fullscreenElement)
 
@@ -469,8 +480,18 @@ const SEARCH_ENGINE_URLS: Record<UiSettings['search_engine'], string> = {
   bing: 'https://www.bing.com/search?q=',
 }
 
+// Matches the marker af_enhance_content appends to author names sourced
+// from twitter:creator/twitter:site rather than a real og:article:author
+// byline (see TWITTER_AUTHOR_ICON in that plugin's init.php) - a handle
+// like "@ripelabs" is often the publication's own account, not the
+// individual writer, so search for "twitter" instead of the feed title.
+const TWITTER_AUTHOR_MARKER = ' 🐦'
+
 function searchAuthor(name: string, feedTitle?: string) {
-  const query = feedTitle ? `${name} ${feedTitle}` : name
+  const isTwitterAuthor = name.endsWith(TWITTER_AUTHOR_MARKER)
+  const cleanName = isTwitterAuthor ? name.slice(0, -TWITTER_AUTHOR_MARKER.length) : name
+  const secondTerm = isTwitterAuthor ? 'twitter' : feedTitle
+  const query = secondTerm ? `${cleanName} ${secondTerm}` : cleanName
   const base = SEARCH_ENGINE_URLS[settingsStore.settings.search_engine]
   window.open(`${base}${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer')
 }
@@ -1013,6 +1034,15 @@ async function refresh() {
 }
 
 .reader-meta-feed:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.reader-meta-domain {
+  cursor: pointer;
+}
+
+.reader-meta-domain:hover {
   color: var(--color-text-primary);
   text-decoration: underline;
 }

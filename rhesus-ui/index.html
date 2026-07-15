@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#1a1a1a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Rhesus">
+    <link rel="apple-touch-icon" href="/favicon.svg">
+    <title>Rhesus</title>
+    <script>
+      // Firefox for Android reads the address-bar title from the second argument
+      // of history.pushState/replaceState, not from document.title changes made
+      // after the call. Vue Router passes '' for that argument. Patch here,
+      // before any module scripts (including the router), so every call carries
+      // 'Rhesus'. Also set document.title synchronously for good measure.
+      (function () {
+        function wrap(orig) {
+          return function (state, _title, url) {
+            document.title = 'Rhesus';
+            return orig.call(this, state, 'Rhesus', url);
+          };
+        }
+        history.pushState = wrap(history.pushState);
+        history.replaceState = wrap(history.replaceState);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

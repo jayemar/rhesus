@@ -1,0 +1,49 @@
+name: Build and push rhesus-server image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rhesus-ui/**'
+      - 'rhesus-server/**'
+      - '.github/workflows/rhesus-server-image.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: rhesus-ui/package-lock.json
+
+      # rhesus-server/Dockerfile copies rhesus-ui/dist, which is gitignored
+      # and never committed - it has to be built here first, same as the
+      # manual `npm run build` step before a local `docker build`.
+      - name: Build Rhesus SPA
+        working-directory: rhesus-ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: rhesus-server/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/rhesus-server:latest

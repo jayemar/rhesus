@@ -7,13 +7,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const passwordLabel = document.getElementById('password-label');
   const authRadios = document.querySelectorAll('input[name="auth-mode"]');
   const appPasswordHint = document.getElementById('app-password-hint');
+  const autoStarEl = document.getElementById('auto-star');
   const saveBtn = document.getElementById('save');
   const statusEl = document.getElementById('status');
 
-  const stored = await browser.storage.local.get(['ttrss_url', 'username', 'password', 'auth_mode']);
+  const stored = await browser.storage.local.get(['ttrss_url', 'username', 'password', 'auth_mode', 'auto_star']);
   if (stored.ttrss_url) urlEl.value = stored.ttrss_url;
   if (stored.username) usernameEl.value = stored.username;
   if (stored.password) passwordEl.value = stored.password;
+  autoStarEl.checked = stored.auto_star !== false;
 
   const savedMode = stored.auth_mode || 'password';
   authRadios.forEach(r => { r.checked = r.value === savedMode; });
@@ -41,6 +43,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const username = usernameEl.value.trim();
     const password = passwordEl.value;
     const auth_mode = getSelectedMode();
+    const auto_star = autoStarEl.checked;
 
     if (!ttrss_url) {
       statusEl.textContent = 'TT-RSS URL is required.';
@@ -76,7 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error((json.content && json.content.error) || 'Login failed');
       }
 
-      await browser.storage.local.set({ ttrss_url, username, password, auth_mode });
+      await browser.storage.local.set({ ttrss_url, username, password, auth_mode, auto_star });
       await browser.storage.local.remove('ttrss_session');
 
       statusEl.textContent = 'Saved. Login successful.';

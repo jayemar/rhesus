@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Rhesus Share",
-  "version": "1.0.2",
-  "description": "Save the current page to TT-RSS as a starred article with an optional note",
+  "version": "1.1.0",
+  "description": "Save the current page to TT-RSS as a published article with an optional note, and an option to automatically star it too",
   "browser_specific_settings": {
     "gecko": {
       "id": "rhesus-share@homelab",

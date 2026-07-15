@@ -111,6 +111,17 @@ legend {
   margin-top: 10px;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+  text-transform: none;
+  font-weight: 400;
+}
+
 .hint {
   font-size: 12px;
   color: var(--color-text-muted);

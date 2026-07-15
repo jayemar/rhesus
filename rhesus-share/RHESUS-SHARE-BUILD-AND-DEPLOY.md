@@ -29,7 +29,7 @@ The extension ID in `manifest.json` keeps the same AMO record across versions.
 ## Step 3 - Host the `.xpi`
 
 Serve the signed file from the homelab nginx so it is reachable via Tailscale.
-The nginx config already contains the required location block in `frontend/nginx.conf`:
+The nginx config already contains the required location block in `rhesus-server/nginx.conf`:
 
 ```nginx
 location /rhesus-share.xpi {
@@ -38,15 +38,16 @@ location /rhesus-share.xpi {
 }
 ```
 
-Copy the signed file into the running frontend container:
+Copy the signed file into the running rhesus-server container:
 
 ```
-docker cp web-ext-artifacts/rhesus_share-<version>.xpi ttrss-frontend-1:/usr/share/nginx/html/rhesus-share.xpi
+docker cp web-ext-artifacts/rhesus_share-<version>.xpi ttrss-rhesus-server-1:/usr/share/nginx/html/rhesus-share.xpi
 ```
 
 The copy takes effect immediately - no container restart needed. Note that the
-file does not survive a container rebuild; re-run the `docker cp` command after
-any `docker compose up --build frontend`.
+file does not survive a container recreate; re-run the `docker cp` command
+after any `docker compose pull rhesus-server && docker compose up -d
+rhesus-server` (which picks up a newly published image).
 
 ## Step 4 - Install on Firefox for Android
 

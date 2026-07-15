@@ -67,6 +67,8 @@ async function performShare(settings, sid, { title, url, note }) {
     sanitize: false,
   });
 
+  if (settings.auto_star === false) return;
+
   const headlines = await apiPost(settings.ttrss_url, {
     op: 'getHeadlines',
     sid,
@@ -120,7 +122,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     titleEl.value = tab.title || '';
   }
 
-  const stored = await browser.storage.local.get(['ttrss_url', 'username', 'password']);
+  const stored = await browser.storage.local.get(['ttrss_url', 'username', 'password', 'auto_star']);
   const configured = stored.ttrss_url && stored.username && stored.password;
 
   if (!configured) {
@@ -156,11 +158,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       ttrss_url: stored.ttrss_url,
       username: stored.username,
       password: stored.password,
+      auto_star: stored.auto_star !== false,
     };
 
     try {
       await doShare(settings, data);
-      statusEl.textContent = 'Saved and starred.';
+      statusEl.textContent = settings.auto_star ? 'Saved and starred.' : 'Saved.';
       statusEl.className = 'status success';
     } catch (err) {
       statusEl.textContent = err.message;

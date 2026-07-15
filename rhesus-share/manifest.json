@@ -1,0 +1,33 @@
+{
+  "manifest_version": 2,
+  "name": "Rhesus Share",
+  "version": "1.0.2",
+  "description": "Save the current page to TT-RSS as a starred article with an optional note",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "rhesus-share@homelab",
+      "strict_min_version": "58.0"
+    }
+  },
+  "icons": {
+    "48": "icons/icon-48.svg",
+    "96": "icons/icon-96.svg"
+  },
+  "browser_action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Rhesus Share",
+    "default_icon": {
+      "48": "icons/icon-48.svg",
+      "96": "icons/icon-96.svg"
+    }
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "<all_urls>"
+  ]
+}

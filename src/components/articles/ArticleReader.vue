@@ -238,6 +238,10 @@
           Category: {{ userCategories.find(c => c.id === currentCatId)?.title ?? 'Uncategorized' }}
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
+        <button class="share-option" @click="openMoreNoteDropdown">
+          Feed note
+          <ChevronRight :size="13" class="share-option-chevron" />
+        </button>
         <button class="share-option" @click="promptUnsubscribe">Unsubscribe from feed</button>
       </div>
       <div v-if="moreCatOpen" class="font-backdrop" @click="moreCatOpen = false" />
@@ -261,6 +265,24 @@
           @click="selectReaderFont(opt.value)"
         >{{ opt.label }}</button>
       </div>
+      <div v-if="moreNoteOpen" class="font-backdrop" @click="moreNoteOpen = false" />
+      <div v-if="moreNoteOpen" class="font-dropdown feed-note-panel" :style="moreNoteDropdownStyle" @click.stop>
+        <div v-if="feedNoteLoading" class="label-status">Loading...</div>
+        <template v-else>
+          <textarea
+            ref="feedNoteInput"
+            v-model="feedNoteText"
+            class="feed-note-textarea"
+            placeholder="Feed notes"
+            @keydown.stop
+            @click.stop
+          />
+          <div class="feed-note-actions">
+            <button class="feed-note-save" :disabled="feedNoteSaving" @click.stop="saveFeedNote">Save</button>
+            <button class="feed-note-cancel" @click.stop="moreNoteOpen = false">Cancel</button>
+          </div>
+        </template>
+      </div>
       <ConfirmDialog
         v-if="feedToUnsubscribe"
         :message="`Unsubscribe from &quot;${feedToUnsubscribe.title}&quot;?`"
@@ -281,7 +303,7 @@ import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
 import { useSettingsStore } from '@/stores/settings'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
-import { deleteFeed, editFeed } from '@/api/feeds'
+import { deleteFeed, editFeed, getFeedNotes } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
@@ -377,6 +399,39 @@ async function selectCategory(catId: number) {
   moreCatOpen.value = false
   await editFeed(props.article.feed_id, { cat_id: catId })
   feedsStore.loadTree()
+}
+
+const moreNoteOpen = ref(false)
+const moreNoteDropdownStyle = ref<Record<string, string>>({})
+const feedNoteText = ref('')
+const feedNoteLoading = ref(false)
+const feedNoteSaving = ref(false)
+const feedNoteInput = ref<HTMLTextAreaElement | null>(null)
+
+async function openMoreNoteDropdown() {
+  showMoreMenu.value = false
+  if (moreBtn.value) {
+    moreNoteDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 260)
+  }
+  moreNoteOpen.value = true
+  feedNoteLoading.value = true
+  try {
+    const notes = await getFeedNotes()
+    feedNoteText.value = notes[props.article.feed_id] ?? ''
+  } finally {
+    feedNoteLoading.value = false
+  }
+  nextTick(() => feedNoteInput.value?.focus())
+}
+
+async function saveFeedNote() {
+  feedNoteSaving.value = true
+  try {
+    await editFeed(props.article.feed_id, { note: feedNoteText.value.trim() })
+    moreNoteOpen.value = false
+  } finally {
+    feedNoteSaving.value = false
+  }
 }
 
 const lightboxSrc = ref<string | null>(null)
@@ -1801,6 +1856,67 @@ watch(
 
 .font-option.active {
   color: var(--color-accent);
+}
+
+.feed-note-panel {
+  padding: 10px;
+}
+
+.feed-note-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.feed-note-textarea:focus {
+  border-color: var(--color-accent);
+}
+
+.feed-note-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+
+.feed-note-save,
+.feed-note-cancel {
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border: none;
+  font-family: var(--font-body);
+}
+
+.feed-note-save {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.feed-note-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.feed-note-cancel {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+[data-theme='dark'] .feed-note-save {
+  color: #1a1a1a;
 }
 
 .floating-toolbar {

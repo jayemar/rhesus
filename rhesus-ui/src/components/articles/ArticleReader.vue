@@ -1121,6 +1121,7 @@ const parsedHero = computed(() => {
 
 function isUsableImageUrl(url: string | null | undefined): boolean {
   if (!url) return false
+  if (url === 'undefined' || url === 'null') return false
   if (/\/tracking[/.]|[-_]pixel\./i.test(url)) return false
   if (/\/undefined(?:[?#/]|$)/.test(url)) return false
   return true

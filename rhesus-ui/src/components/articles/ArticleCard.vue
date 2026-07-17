@@ -99,6 +99,10 @@ function firstContentImage(content: string): string | null {
   if (!match || !match[1]) return null
   const decoded = decodeHtmlEntities(match[1])
   if (decoded.startsWith('data:')) return null
+  // Some feeds ship a template that never got its image URL filled in
+  // (e.g. NPR's Picture Show gallery posts literally emit src="undefined")
+  // - not a real URL, so don't bother attempting to load it.
+  if (decoded === 'undefined' || decoded === 'null') return null
   return toProxyUrl(decoded)
 }
 

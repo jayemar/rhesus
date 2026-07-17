@@ -25,6 +25,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("editFeed", $this);
         $host->add_api_method("getFeedNotes", $this);
         $host->add_api_method("removeFeedIcon", $this);
+        $host->add_api_method("fetchIconFromUrl", $this);
         $host->add_api_method("importOpml", $this);
         $host->add_api_method("fetchFullContent", $this);
         $host->add_api_method("resolveSubscribeUrl", $this);
@@ -33,6 +34,24 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("getLabelCounts", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
         $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
+        $host->add_hook(PluginHost::HOOK_RENDER_ARTICLE_API, $this);
+    }
+
+    // TT-RSS's JSON API never returns date_entered (the column headline
+    // ordering actually sorts by, distinct from `updated`/the publish date) -
+    // this adds it to every article/headline response so Rhesus can display
+    // it when the user's "Sort articles by" setting is "Retrieval date".
+    public function hook_render_article_api($row) {
+        $article = $row['headline'] ?? $row['article'] ?? $row;
+
+        if (isset($article['id'])) {
+            $sth = $this->pdo->prepare("SELECT date_entered FROM ttrss_entries WHERE id = ?");
+            $sth->execute([$article['id']]);
+            $date_entered = $sth->fetchColumn();
+            $article['date_entered'] = $date_entered ? (int)strtotime($date_entered) : null;
+        }
+
+        return $article;
     }
 
     // Fix common XML malformations in raw feed content before LibXML parsing.
@@ -450,6 +469,102 @@ class Rhesus_Settings extends Plugin {
         return [0, ["status" => "OK"]];
     }
 
+    // Validates icon bytes (size, then real sniffed MIME type rather than a
+    // trusted header/extension) and, if valid, stores them as $feed's custom
+    // icon. Shared by fetchIconFromUrl() below and upload_icon.php, which is
+    // a standalone script (not a Plugin API method, since it needs
+    // multipart/form-data for its file upload) that requires this file
+    // directly to reach this method - so both paths produce an identical
+    // result from one place rather than two hand-maintained copies. Static
+    // since it needs no plugin/host state, only $feed and the bytes.
+    // Returns ["error" => null] on success, or ["error" => CODE, ...extra]
+    // on failure (extra fields like max_size/detected_type for the caller
+    // to pass straight through to the client).
+    public static function saveFeedIcon($feed, string $content): array {
+        $max_size = (int)Config::get(Config::MAX_FAVICON_FILE_SIZE);
+        if (strlen($content) > $max_size) {
+            return ["error" => "ICON_FILE_TOO_LARGE", "max_size" => $max_size];
+        }
+
+        // Sniff the real content rather than trusting a Content-Type header
+        // or the browser-reported upload type (either can lie, or be
+        // absent) - this is what stops an SVG (which can carry embedded
+        // <script>) from being accepted just because its header claims to
+        // be a PNG, or because a browser upload dialog only checks that the
+        // type starts with "image/", which image/svg+xml also satisfies.
+        $tmp = tempnam(sys_get_temp_dir(), 'rhesus_icon_');
+        if ($tmp === false || file_put_contents($tmp, $content) === false) {
+            return ["error" => "ICON_READ_FAILED"];
+        }
+        $mime_type = mime_content_type($tmp);
+        unlink($tmp);
+
+        $allowed_mime_types = [
+            'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+            'image/bmp', 'image/x-icon', 'image/vnd.microsoft.icon',
+        ];
+        if (!in_array($mime_type, $allowed_mime_types, true)) {
+            return ["error" => "ICON_INVALID_TYPE", "detected_type" => $mime_type];
+        }
+
+        $cache = DiskCache::instance('feed-icons');
+        if (!$cache->put((string)$feed->id, $content)) {
+            return ["error" => "ICON_SAVE_FAILED"];
+        }
+
+        $feed->set([
+            'favicon_avg_color' => null,
+            'favicon_is_custom' => true,
+        ]);
+        $feed->save();
+
+        return ["error" => null];
+    }
+
+    // Fetches an image from a URL server-side and sets it as a feed's icon -
+    // an alternative to upload_icon.php's file upload, for when you just
+    // have a link to an icon rather than a local file. The fetch itself
+    // reuses the same SSRF-guarded fetch as previewFeed()/resolveSubscribeUrl()
+    // - this endpoint fetches an arbitrary user-supplied URL server-side too,
+    // so it needs the same protection.
+    // Called via: POST /tt-rss/api/ {"op":"fetchIconFromUrl","sid":"...","feed_id":N,"url":"..."}
+    public function fetchIconFromUrl(): array {
+        $feed_id = (int)($_REQUEST['feed_id'] ?? 0);
+        if (!$feed_id) {
+            return [1, ["error" => "MISSING_FEED_ID"]];
+        }
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $feed = ORM::for_table('ttrss_feeds')
+            ->where(['id' => $feed_id, 'owner_uid' => $uid])
+            ->find_one();
+        if (!$feed) {
+            return [1, ["error" => "FEED_NOT_FOUND"]];
+        }
+
+        $url = trim($_REQUEST['url'] ?? '');
+        if ($url === '') {
+            return [1, ["error" => "MISSING_URL"]];
+        }
+        if ($err = $this->validateFetchUrl($url)) {
+            return [1, ["error" => $err]];
+        }
+
+        $content = UrlHelper::fetch(['url' => $url]);
+        if (!$content) {
+            return [1, ["error" => "FETCH_FAILED", "message" => truncate_string(clean(UrlHelper::$fetch_last_error), 250, '…')]];
+        }
+
+        $result = self::saveFeedIcon($feed, $content);
+        if ($result['error']) {
+            return [1, $result];
+        }
+
+        return [0, ["status" => "OK"]];
+    }
+
     // Imports an OPML file supplied as a string.
     // Called via: POST /tt-rss/api/ {"op":"importOpml","sid":"...","content":"<?xml ..."}
     public function importOpml(): array {
@@ -517,9 +632,9 @@ class Rhesus_Settings extends Plugin {
     // Works around a TT-RSS bug where subscribeToFeed returns code 6 because it
     // fails to re-fetch content after extracting the autodiscovered feed URL.
     // Blocks anything other than plain http(s) on standard ports, and any
-    // hostname resolving to a private/reserved IP (SSRF protection) - both
-    // resolveSubscribeUrl() and previewFeed() fetch a user-supplied URL
-    // server-side, so both need this.
+    // hostname resolving to a private/reserved IP (SSRF protection) -
+    // resolveSubscribeUrl(), previewFeed(), and fetchIconFromUrl() all fetch
+    // a user-supplied URL server-side, so all three need this.
     private function validateFetchUrl(string $url): ?string {
         $parsed = parse_url($url);
         $scheme = strtolower($parsed['scheme'] ?? '');

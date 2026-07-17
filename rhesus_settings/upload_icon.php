@@ -28,6 +28,10 @@ chdir($ttrss_root);
 define('NO_SESSION_AUTOSTART', true);
 require_once $ttrss_root . '/include/autoload.php';
 require_once $ttrss_root . '/include/sessions.php';
+// Rhesus_Settings::saveFeedIcon() isn't autoloaded - plugin classes are only
+// loaded by PluginHost scanning plugins.local/, which this standalone script
+// bypasses entirely (see the file-level comment above).
+require_once __DIR__ . '/init.php';
 
 // Response shape mirrors this plugin's other JSON API methods: {"status": 0|1, "content": {...}}
 function fail(string $error, array $extra = []): never {
@@ -81,33 +85,18 @@ if ($upload['size'] > $max_size) {
     fail('ICON_FILE_TOO_LARGE', ['max_size' => $max_size]);
 }
 
-// See the file-level comment: the native dialog only checks that the
-// browser-reported type starts with "image/", which svg+xml also satisfies.
-// Validate the actual sniffed type against what DiskCache::send() will
-// really deliver, so a bad upload is rejected now instead of at serve time.
-$allowed_mime_types = [
-    'image/png', 'image/jpeg', 'image/gif', 'image/webp',
-    'image/bmp', 'image/x-icon', 'image/vnd.microsoft.icon',
-];
-$mime_type = mime_content_type($upload['tmp_name']);
-if (!in_array($mime_type, $allowed_mime_types, true)) {
-    fail('ICON_INVALID_TYPE', ['detected_type' => $mime_type]);
-}
-
 $content = file_get_contents($upload['tmp_name']);
 if ($content === false) {
     fail('ICON_READ_FAILED');
 }
 
-$cache = DiskCache::instance('feed-icons');
-if (!$cache->put((string)$feed_id, $content)) {
-    fail('ICON_SAVE_FAILED');
+// Shared with fetchIconFromUrl() - same MIME sniffing (not the
+// browser-reported type, which the native dialog only checks starts with
+// "image/", which svg+xml also satisfies), same size limit, same
+// DiskCache/feed-row updates.
+$result = Rhesus_Settings::saveFeedIcon($feed, $content);
+if ($result['error']) {
+    fail($result['error'], array_diff_key($result, ['error' => true]));
 }
-
-$feed->set([
-    'favicon_avg_color' => null,
-    'favicon_is_custom' => true,
-]);
-$feed->save();
 
 ok(['status' => 'OK']);

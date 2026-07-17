@@ -1,1 +1,3 @@
 rhesus-share/web-ext-artifacts/
+rhesus_settings/.phpunit.result.cache
+rhesus_settings/vendor/bin/.phpunit.result.cache

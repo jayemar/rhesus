@@ -330,11 +330,18 @@ import { useSettingsStore } from '@/stores/settings'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
 import { editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
+import { extractJsonLdMeta } from '@/utils/jsonld'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
 const props = defineProps<{ article: ApiArticle, scrolled?: boolean }>()
-const emit = defineEmits<{ close: [], copied: [label: string], 'scroll-to-top': [], 'create-filter-from-tags': [tags: string[]] }>()
+const emit = defineEmits<{
+  close: []
+  copied: [label: string]
+  'scroll-to-top': []
+  'create-filter-from-tags': [tags: string[]]
+  'full-content-meta': [meta: { author?: string, publishedAt?: number }]
+}>()
 const articlesStore = useArticlesStore()
 const feedsStore = useFeedsStore()
 const settingsStore = useSettingsStore()
@@ -785,6 +792,7 @@ watch(() => props.article.id, () => {
   highlights = []
   fullContent.value = null
   fetchingFull.value = false
+  emit('full-content-meta', {})
   if (showSearch.value && searchQuery.value) {
     nextTick(() => doSearch())
   }
@@ -922,12 +930,35 @@ async function nativeShare() {
 async function toggleFullContent() {
   if (fullContent.value !== null) {
     fullContent.value = null
+    emit('full-content-meta', {})
     return
   }
   fetchingFull.value = true
   try {
     const result = await fetchFullContent(props.article.id)
     const doc = new DOMParser().parseFromString(result.content, 'text/html')
+
+    // Extract JSON-LD metadata before Readability's cleanup pass touches the
+    // document. Only ever used as a fallback for values the feed itself
+    // didn't provide - never to override real feed data.
+    const jsonLdMeta = extractJsonLdMeta(doc)
+    const meta: { author?: string, publishedAt?: number } = {}
+    if (!props.article.author && jsonLdMeta.author) {
+      meta.author = jsonLdMeta.author
+    }
+    // TT-RSS falls back to fetch time for `updated` when a feed provides no
+    // publish date of its own. There's no explicit "missing date" flag, but
+    // when `updated` sits within a minute of `date_entered` (when this
+    // user's row was created), that's a strong sign `updated` IS the fetch
+    // time rather than a real feed-provided date - fair game to prefer the
+    // article's own JSON-LD date instead.
+    const looksLikeFetchTimeFallback =
+      props.article.date_entered !== undefined &&
+      Math.abs(props.article.updated - props.article.date_entered) <= 60
+    if (looksLikeFetchTimeFallback && jsonLdMeta.publishedAt) {
+      meta.publishedAt = jsonLdMeta.publishedAt
+    }
+
     doc.documentElement.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
     const base = doc.createElement('base')
     base.setAttribute('href', result.url)
@@ -962,6 +993,7 @@ async function toggleFullContent() {
 
     const article = new Readability(doc).parse()
     fullContent.value = article?.content ?? result.content
+    if (meta.author || meta.publishedAt) emit('full-content-meta', meta)
   } catch {
     emit('copied', 'Could not fetch full content')
   } finally {

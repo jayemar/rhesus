@@ -139,13 +139,13 @@
                 <span class="reader-meta-feed" @click="goToFeed(selectedArticle.feed_id)">{{ selectedArticle.feed_title }}</span>
                 <span v-if="readerLinkDomain" class="reader-meta-domain" @click="openLinkDomain">{{ readerLinkDomain }}</span>
                 <span
-                  v-if="selectedArticle.author"
+                  v-if="readerAuthor"
                   class="reader-meta-author"
-                  @click="searchAuthor(selectedArticle.author, readerLinkDomain ?? selectedArticle.feed_title)"
-                >{{ selectedArticle.author }}</span>
-                <span>{{ formatArticleDate(selectedArticle.updated) }}</span>
+                  @click="searchAuthor(readerAuthor, readerLinkDomain ?? selectedArticle.feed_title)"
+                >{{ readerAuthor }}</span>
+                <span>{{ formatArticleDate(readerDate) }}</span>
               </div>
-              <ArticleReader :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" />
+              <ArticleReader :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" />
             </div>
           </div>
         </div>
@@ -316,6 +316,19 @@ function formatArticleDate(ts: number): string {
 const selectedArticle = computed(() =>
   selectedId.value !== null ? articles.value.find((a) => a.id === selectedId.value) ?? null : null,
 )
+
+// Fallback author/publish-date pulled from the full article's JSON-LD, only
+// ever set when the feed itself didn't provide one - see ArticleReader.vue's
+// toggleFullContent(). Cleared whenever ArticleReader re-emits (article
+// change, or full content toggled back off).
+const fullContentMeta = ref<{ author?: string, publishedAt?: number }>({})
+
+function onFullContentMeta(meta: { author?: string, publishedAt?: number }) {
+  fullContentMeta.value = meta
+}
+
+const readerAuthor = computed(() => selectedArticle.value?.author || fullContentMeta.value.author || '')
+const readerDate = computed(() => fullContentMeta.value.publishedAt ?? selectedArticle.value?.updated ?? 0)
 
 const readerLinkDomain = computed(() =>
   selectedArticle.value ? externalLinkDomain(selectedArticle.value.link, selectedArticle.value.site_url) : null,

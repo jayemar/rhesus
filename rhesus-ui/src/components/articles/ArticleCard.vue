@@ -40,6 +40,7 @@
         <div class="card-right-top">
           <Star v-if="article.marked" class="star-badge" :size="11" aria-label="Starred" />
           <TagIcon v-if="article.labels && article.labels.length" class="label-badge" :size="11" aria-label="Labelled" />
+          <StickyNote v-if="article.note" class="note-badge" :size="11" aria-label="Has a note" />
           <span class="timestamp">{{ articleDate }}</span>
         </div>
         <div v-if="showThumbs && thumbUrl" class="card-thumb">
@@ -54,7 +55,7 @@
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { Star, Check, Rss, Tag as TagIcon } from 'lucide-vue-next'
+import { Star, Check, Rss, Tag as TagIcon, StickyNote } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'
@@ -135,8 +136,14 @@ const truncatedExcerpt = computed(() => {
 
 const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
 
+const articleTimestamp = computed(() =>
+  settingsStore.settings.date_sort === 'retrieval'
+    ? props.article.date_entered ?? props.article.updated
+    : props.article.updated
+)
+
 const articleDate = computed(() => {
-  const d = new Date(props.article.updated * 1000)
+  const d = new Date(articleTimestamp.value * 1000)
   const now = new Date()
   if (d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
     const h = String(d.getHours()).padStart(2, '0')
@@ -476,6 +483,15 @@ img.feed-icon {
 }
 
 .label-badge :deep(path), .label-badge :deep(polygon) {
+  fill: currentColor;
+}
+
+.note-badge {
+  color: var(--color-starred);
+  flex-shrink: 0;
+}
+
+.note-badge :deep(path), .note-badge :deep(rect) {
   fill: currentColor;
 }
 

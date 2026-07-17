@@ -2,17 +2,28 @@
   <div class="overlay" @click.self="$emit('cancel')">
     <div class="dialog">
       <p>{{ message }}</p>
+      <textarea
+        v-if="reasonPlaceholder"
+        v-model="reasonText"
+        class="reason-input"
+        :placeholder="reasonPlaceholder"
+        rows="2"
+      />
       <div class="actions">
         <button class="btn-cancel" @click="$emit('cancel')">Cancel</button>
-        <button class="btn-confirm" @click="$emit('confirm')">Confirm</button>
+        <button class="btn-confirm" @click="$emit('confirm', reasonText)">Confirm</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps<{ message: string }>()
-defineEmits<{ confirm: []; cancel: [] }>()
+import { ref } from 'vue'
+
+defineProps<{ message: string; reasonPlaceholder?: string }>()
+defineEmits<{ confirm: [reason?: string]; cancel: [] }>()
+
+const reasonText = ref('')
 </script>
 
 <style scoped>
@@ -37,6 +48,24 @@ defineEmits<{ confirm: []; cancel: [] }>()
 
 p {
   margin-bottom: 20px;
+}
+
+.reason-input {
+  width: 100%;
+  resize: vertical;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  margin-bottom: 20px;
+}
+
+.reason-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
 }
 
 .actions {

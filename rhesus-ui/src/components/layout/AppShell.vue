@@ -115,7 +115,7 @@
           @keydown.esc="showFilterManager = false"
         >
           <button class="settings-close" title="Close" @click="showFilterManager = false"><X :size="14" /></button>
-          <FilterManager />
+          <FilterManager :initial-filter="filterManagerInitialFilter" />
         </div>
       </Transition>
 
@@ -144,11 +144,8 @@
                   @click="searchAuthor(selectedArticle.author, readerLinkDomain ?? selectedArticle.feed_title)"
                 >{{ selectedArticle.author }}</span>
                 <span>{{ formatArticleDate(selectedArticle.updated) }}</span>
-                <span v-if="readingTime(selectedArticle.content) > 0">
-                  {{ readingTime(selectedArticle.content) }} min read
-                </span>
               </div>
-              <ArticleReader :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" />
+              <ArticleReader :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" />
             </div>
           </div>
         </div>
@@ -197,7 +194,8 @@ import SettingsPanel from '@/components/SettingsPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { browserShowsNativeToast } from '@/utils/clipboard'
 import { externalLinkDomain, originOf } from '@/utils/url'
-import type { ApiFeedTreeItem, UiSettings } from '@/types/api'
+import { blankRule, escapeRegExp } from '@/utils/filterDefaults'
+import type { ApiFeedTreeItem, ApiFilter, UiSettings } from '@/types/api'
 
 const appVersion = __APP_VERSION__
 const buildDate = __BUILD_DATE__
@@ -265,6 +263,7 @@ const confirmLogout = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
 const showFilterManager = ref(false)
+const filterManagerInitialFilter = ref<Partial<ApiFilter> | null>(null)
 const showArticleSearch = ref(false)
 const copyToast = ref<string | null>(null)
 const historyPushed = ref(false)
@@ -310,14 +309,8 @@ function scrollToTop() {
 
 function formatArticleDate(ts: number): string {
   return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric',
+    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
   }).format(new Date(ts * 1000))
-}
-
-function readingTime(content: string | undefined): number {
-  if (!content) return 0
-  const words = content.replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length
-  return Math.max(1, Math.ceil(words / 225))
 }
 
 const selectedArticle = computed(() =>
@@ -406,6 +399,12 @@ watch(
 // behind it cannot scroll through touch inertia or mis-fires.
 watch([showSettings, showFeedEditor, showFilterManager, sidebarCollapsed], ([s, f, fm, collapsed]) => {
   document.body.style.overflow = (s || f || fm || !collapsed) ? 'hidden' : ''
+})
+
+// Clear the tag-derived prefill once the filter manager closes, so reopening
+// it normally (e.g. via the sidebar button) starts at the blank list again.
+watch(showFilterManager, (open) => {
+  if (!open) filterManagerInitialFilter.value = null
 })
 
 // Periodic polling: restart the timer whenever the interval setting changes.
@@ -555,6 +554,17 @@ function toggleFilterManager() {
   showFeedEditor.value = false
   showFilterManager.value = !showFilterManager.value
   if (showFilterManager.value) settings.value.sidebar_collapsed = true
+}
+
+function onCreateFilterFromTags(tags: string[]) {
+  filterManagerInitialFilter.value = {
+    title: tags.join(', '),
+    rules: tags.map(tag => ({ ...blankRule(), filter_type: 7, reg_exp: `^${escapeRegExp(tag)}$` })),
+  }
+  showSettings.value = false
+  showFeedEditor.value = false
+  showFilterManager.value = true
+  settings.value.sidebar_collapsed = true
 }
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null

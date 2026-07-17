@@ -127,14 +127,23 @@
       <button class="tb-btn" title="Close search" @click.stop="closeSearch"><X :size="14" /></button>
     </div>
     <div v-if="showNote" class="reader-note">
-      <textarea
-        ref="noteInput"
-        v-model="noteText"
-        class="reader-note-input"
-        placeholder="Add a note..."
-        @keydown.stop
-        @click.stop
-      />
+      <div class="reader-note-input-wrap">
+        <textarea
+          ref="noteInput"
+          v-model="noteText"
+          class="reader-note-input"
+          placeholder="Add a note..."
+          @keydown.stop
+          @click.stop
+        />
+        <button
+          v-if="noteText"
+          class="reader-note-clear-btn"
+          type="button"
+          title="Clear"
+          @click.stop="noteText = ''"
+        ><X :size="14" /></button>
+      </div>
       <div class="reader-note-actions">
         <button class="reader-note-save" :disabled="noteSaving" @click.stop="saveNote">Save</button>
         <button class="reader-note-cancel" @click.stop="cancelNote">Cancel</button>
@@ -238,11 +247,11 @@
           Category: {{ userCategories.find(c => c.id === currentCatId)?.title ?? 'Uncategorized' }}
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
-        <button class="share-option" @click="openMoreNoteDropdown">
-          Feed note
+        <button class="share-option" @click="openMoreTagsDropdown">
+          Tags ({{ nonEmptyTags.length }})
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
-        <button class="share-option" @click="promptUnsubscribe">Unsubscribe from feed</button>
+        <button class="share-option" @click="openFeedEditDialog">Edit feed</button>
       </div>
       <div v-if="moreCatOpen" class="font-backdrop" @click="moreCatOpen = false" />
       <div v-if="moreCatOpen" class="font-dropdown" :style="moreCatDropdownStyle" @click.stop>
@@ -253,6 +262,40 @@
           :class="{ active: cat.id === currentCatId }"
           @click="selectCategory(cat.id)"
         >{{ cat.title }}</button>
+      </div>
+      <div v-if="moreTagsOpen" class="font-backdrop" @click="moreTagsOpen = false" />
+      <div v-if="moreTagsOpen" class="font-dropdown tags-popup" :style="moreTagsDropdownStyle" @click.stop>
+        <div class="tags-popup-heading">Tags</div>
+        <div v-if="!nonEmptyTags.length" class="label-status">No tags</div>
+        <template v-else>
+          <label
+            class="tag-row"
+            :class="{ 'tag-row--static': !pickingTagsForFilter }"
+            v-for="tag in nonEmptyTags"
+            :key="tag"
+          >
+            <input
+              v-if="pickingTagsForFilter"
+              type="checkbox"
+              :checked="selectedTags.has(tag)"
+              @change="toggleTagSelection(tag)"
+            />
+            <span class="tag-text">{{ tag }}</span>
+          </label>
+          <div class="tag-filter-footer">
+            <button
+              v-if="!pickingTagsForFilter"
+              class="tag-filter-create-btn"
+              @click="pickingTagsForFilter = true"
+            >Create filter...</button>
+            <button
+              v-else
+              class="tag-filter-create-btn"
+              :disabled="!selectedTags.size"
+              @click="onCreateFilterFromSelectedTags"
+            >Create filter{{ selectedTags.size ? ` (${selectedTags.size})` : '' }}</button>
+          </div>
+        </template>
       </div>
       <div v-if="moreFontOpen" class="font-backdrop" @click="moreFontOpen = false" />
       <div v-if="moreFontOpen" class="font-dropdown" :style="moreFontDropdownStyle" @click.stop>
@@ -265,29 +308,11 @@
           @click="selectReaderFont(opt.value)"
         >{{ opt.label }}</button>
       </div>
-      <div v-if="moreNoteOpen" class="font-backdrop" @click="moreNoteOpen = false" />
-      <div v-if="moreNoteOpen" class="font-dropdown feed-note-panel" :style="moreNoteDropdownStyle" @click.stop>
-        <div v-if="feedNoteLoading" class="label-status">Loading...</div>
-        <template v-else>
-          <textarea
-            ref="feedNoteInput"
-            v-model="feedNoteText"
-            class="feed-note-textarea"
-            placeholder="Feed notes"
-            @keydown.stop
-            @click.stop
-          />
-          <div class="feed-note-actions">
-            <button class="feed-note-save" :disabled="feedNoteSaving" @click.stop="saveFeedNote">Save</button>
-            <button class="feed-note-cancel" @click.stop="moreNoteOpen = false">Cancel</button>
-          </div>
-        </template>
-      </div>
-      <ConfirmDialog
-        v-if="feedToUnsubscribe"
-        :message="`Unsubscribe from &quot;${feedToUnsubscribe.title}&quot;?`"
-        @confirm="doUnsubscribe"
-        @cancel="feedToUnsubscribe = null"
+      <FeedEditDialog
+        v-if="showFeedEditDialog"
+        :feed-id="article.feed_id"
+        @close="showFeedEditDialog = false"
+        @unsubscribed="onFeedUnsubscribed"
       />
     </Teleport>
   </div>
@@ -303,13 +328,13 @@ import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
 import { useSettingsStore } from '@/stores/settings'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
-import { deleteFeed, editFeed, getFeedNotes } from '@/api/feeds'
+import { editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
-import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
 const props = defineProps<{ article: ApiArticle, scrolled?: boolean }>()
-const emit = defineEmits<{ close: [], copied: [label: string], 'scroll-to-top': [] }>()
+const emit = defineEmits<{ close: [], copied: [label: string], 'scroll-to-top': [], 'create-filter-from-tags': [tags: string[]] }>()
 const articlesStore = useArticlesStore()
 const feedsStore = useFeedsStore()
 const settingsStore = useSettingsStore()
@@ -401,37 +426,49 @@ async function selectCategory(catId: number) {
   feedsStore.loadTree()
 }
 
-const moreNoteOpen = ref(false)
-const moreNoteDropdownStyle = ref<Record<string, string>>({})
-const feedNoteText = ref('')
-const feedNoteLoading = ref(false)
-const feedNoteSaving = ref(false)
-const feedNoteInput = ref<HTMLTextAreaElement | null>(null)
+const moreTagsOpen = ref(false)
+const moreTagsDropdownStyle = ref<Record<string, string>>({})
+const selectedTags = ref<Set<string>>(new Set())
+const pickingTagsForFilter = ref(false)
 
-async function openMoreNoteDropdown() {
+const nonEmptyTags = computed(() =>
+  (props.article.tags ?? []).map(t => t.trim()).filter(t => t !== '')
+)
+
+function openMoreTagsDropdown() {
   showMoreMenu.value = false
   if (moreBtn.value) {
-    moreNoteDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 260)
+    moreTagsDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 220)
   }
-  moreNoteOpen.value = true
-  feedNoteLoading.value = true
-  try {
-    const notes = await getFeedNotes()
-    feedNoteText.value = notes[props.article.feed_id] ?? ''
-  } finally {
-    feedNoteLoading.value = false
-  }
-  nextTick(() => feedNoteInput.value?.focus())
+  selectedTags.value = new Set()
+  pickingTagsForFilter.value = false
+  moreTagsOpen.value = true
 }
 
-async function saveFeedNote() {
-  feedNoteSaving.value = true
-  try {
-    await editFeed(props.article.feed_id, { note: feedNoteText.value.trim() })
-    moreNoteOpen.value = false
-  } finally {
-    feedNoteSaving.value = false
-  }
+function toggleTagSelection(tag: string) {
+  const next = new Set(selectedTags.value)
+  if (next.has(tag)) next.delete(tag)
+  else next.add(tag)
+  selectedTags.value = next
+}
+
+const showFeedEditDialog = ref(false)
+
+function openFeedEditDialog() {
+  showMoreMenu.value = false
+  showFeedEditDialog.value = true
+}
+
+function onFeedUnsubscribed() {
+  showFeedEditDialog.value = false
+  emit('close')
+}
+
+function onCreateFilterFromSelectedTags() {
+  if (!selectedTags.value.size) return
+  moreTagsOpen.value = false
+  emit('create-filter-from-tags', Array.from(selectedTags.value))
+  emit('close')
 }
 
 const lightboxSrc = ref<string | null>(null)
@@ -760,7 +797,6 @@ const sharePopupStyle = ref<Record<string, string>>({})
 const showMoreMenu = ref(false)
 const moreBtn = ref<HTMLElement | null>(null)
 const morePopupStyle = ref<Record<string, string>>({})
-const feedToUnsubscribe = ref<{ id: number; title: string } | null>(null)
 
 const fullContent = ref<string | null>(null)
 const fetchingFull = ref(false)
@@ -864,20 +900,6 @@ function openMoreMenu(event: MouseEvent) {
 function openInNewTab() {
   showMoreMenu.value = false
   if (props.article.link) window.open(props.article.link, '_blank', 'noopener,noreferrer')
-}
-
-function promptUnsubscribe() {
-  showMoreMenu.value = false
-  feedToUnsubscribe.value = { id: props.article.feed_id, title: props.article.feed_title ?? 'this feed' }
-}
-
-async function doUnsubscribe() {
-  const feed = feedToUnsubscribe.value
-  feedToUnsubscribe.value = null
-  if (!feed) return
-  await deleteFeed(feed.id)
-  feedsStore.loadTree()
-  emit('close')
 }
 
 const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
@@ -1719,10 +1741,14 @@ watch(
   border-bottom: 1px solid var(--color-border);
 }
 
+.reader-note-input-wrap {
+  position: relative;
+}
+
 .reader-note-input {
   width: 100%;
   min-height: 80px;
-  padding: 6px 8px;
+  padding: 6px 26px 6px 8px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
   background: var(--color-bg);
@@ -1736,6 +1762,23 @@ watch(
 
 .reader-note-input:focus {
   border-color: var(--color-accent);
+}
+
+.reader-note-clear-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  padding: 2px;
+  border-radius: 2px;
+  transition: color var(--transition-fast);
+}
+
+.reader-note-clear-btn:hover {
+  color: var(--color-text-primary);
 }
 
 .reader-note-actions {
@@ -1858,65 +1901,71 @@ watch(
   color: var(--color-accent);
 }
 
-.feed-note-panel {
-  padding: 10px;
+.tags-popup {
+  max-height: 320px;
+  overflow-y: auto;
 }
 
-.feed-note-textarea {
-  width: 100%;
-  min-height: 80px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg);
+.tags-popup-heading {
+  padding: 10px 14px;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--color-text-primary);
-  font-family: var(--font-body);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-body);
-  resize: vertical;
-  outline: none;
-  box-sizing: border-box;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.feed-note-textarea:focus {
-  border-color: var(--color-accent);
-}
-
-.feed-note-actions {
+.tag-row {
   display: flex;
+  align-items: center;
   gap: 8px;
-  margin-top: 6px;
-  justify-content: flex-end;
-}
-
-.feed-note-save,
-.feed-note-cancel {
-  padding: 4px 14px;
-  border-radius: 4px;
+  width: 100%;
+  padding: 10px 14px;
   font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
   cursor: pointer;
-  border: none;
-  font-family: var(--font-body);
+  transition: background var(--transition-fast);
 }
 
-.feed-note-save {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
+.tag-row:hover {
+  background: var(--color-surface);
 }
 
-.feed-note-save:disabled {
-  opacity: 0.6;
+.tag-row--static {
   cursor: default;
 }
 
-.feed-note-cancel {
-  background: transparent;
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
+.tag-row--static:hover {
+  background: none;
 }
 
-[data-theme='dark'] .feed-note-save {
-  color: #1a1a1a;
+.tag-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-filter-footer {
+  padding: 8px 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.tag-filter-create-btn {
+  width: 100%;
+  padding: 8px 0;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.tag-filter-create-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .floating-toolbar {

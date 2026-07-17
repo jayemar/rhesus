@@ -83,6 +83,15 @@ export async function removeFeedIcon(feedId: number): Promise<void> {
   await call('removeFeedIcon', { feed_id: feedId })
 }
 
+// Alternative to uploadFeedIcon() for when you have a link to an icon
+// rather than a local file - the server fetches the URL itself (see
+// rhesus_settings's fetchIconFromUrl(), including why this can't just be a
+// browser-side fetch() of the URL: most icon hosts don't send CORS headers
+// permitting cross-origin reads).
+export async function fetchIconFromUrl(feedId: number, url: string): Promise<void> {
+  await call('fetchIconFromUrl', { feed_id: feedId, url })
+}
+
 export async function importOpml(content: string): Promise<void> {
   await call('importOpml', { content })
 }
@@ -110,4 +119,18 @@ export async function previewFeed(url: string): Promise<FeedPreview> {
 
 export async function refreshFeed(feedId: number): Promise<void> {
   await call('updateFeed', { feed_id: feedId })
+}
+
+// Logs a subscribe event to the feed_subscription_log plugin, reusing
+// whatever note was already entered in the Add Feed flow - see
+// feed_subscription_log/init.php's logFeedSubscribed().
+export async function logFeedSubscribed(feedId: number, note?: string): Promise<void> {
+  await call('logFeedSubscribed', { feed_id: feedId, note: note ?? '' })
+}
+
+// Stashes an unsubscribe reason/note so feed_subscription_log's
+// hook_unsubscribe_feed() can pick it up when the subsequent unsubscribeFeed
+// call triggers it - see feed_subscription_log/init.php's logUnsubscribeReason().
+export async function logUnsubscribeReason(feedId: number, reason?: string, note?: string): Promise<void> {
+  await call('logUnsubscribeReason', { feed_id: feedId, reason: reason ?? '', note: note ?? '' })
 }

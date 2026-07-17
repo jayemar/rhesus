@@ -70,6 +70,7 @@ export interface ApiArticle {
   title: string
   link: string
   updated: number
+  date_entered?: number
   is_updated: boolean
   unread: boolean
   marked: boolean
@@ -82,6 +83,7 @@ export interface ApiArticle {
   excerpt?: string
   attachments?: ApiAttachment[]
   labels?: [number, string, string, string][]
+  tags?: string[]
   score?: number
   note?: string
   lang?: string

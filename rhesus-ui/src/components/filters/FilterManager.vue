@@ -58,11 +58,12 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import FilterEditor from './FilterEditor.vue'
 import type { ApiFilter } from '@/types/api'
 
+const props = defineProps<{ initialFilter?: Partial<ApiFilter> | null }>()
 defineEmits<{ close: [] }>()
 
 const loading = ref(false)
 const filters = ref<ApiFilter[]>([])
-const editingFilter = ref<Partial<ApiFilter> | null>(null)
+const editingFilter = ref<Partial<ApiFilter> | null>(props.initialFilter ?? null)
 const filterToDelete = ref<ApiFilter | null>(null)
 
 onMounted(load)

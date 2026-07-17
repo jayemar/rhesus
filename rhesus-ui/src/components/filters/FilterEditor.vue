@@ -111,9 +111,8 @@ import { ChevronLeft, X } from 'lucide-vue-next'
 import { useFeedsStore } from '@/stores/feeds'
 import { getAllLabels } from '@/api/articles'
 import { saveFilter } from '@/api/filters'
+import { blankRule, blankAction, type RuleWithScope } from '@/utils/filterDefaults'
 import type { ApiFilter, ApiFilterRule, ApiFilterAction, ApiLabel, ApiFeedTreeItem } from '@/types/api'
-
-type RuleWithScope = ApiFilterRule & { scopeType: 'all' | 'feed' | 'cat' }
 
 interface DraftFilter {
   id?: number
@@ -141,14 +140,6 @@ function toScopeType(rule: ApiFilterRule): 'all' | 'feed' | 'cat' {
   if (rule.cat_filter && rule.cat_id != null) return 'cat'
   if (!rule.cat_filter && rule.feed_id != null) return 'feed'
   return 'all'
-}
-
-function blankRule(): RuleWithScope {
-  return { reg_exp: '', filter_type: 1, inverse: false, feed_id: null, cat_id: null, cat_filter: false, scopeType: 'all' }
-}
-
-function blankAction(): ApiFilterAction {
-  return { action_id: 2, action_param: '' }
 }
 
 const draft = ref<DraftFilter>({

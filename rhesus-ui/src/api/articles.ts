@@ -10,6 +10,7 @@ export interface GetHeadlinesOptions {
   viewMode?: string
   dateSort?: 'retrieval' | 'publication'
   sinceId?: number
+  search?: string
 }
 
 export async function getHeadlines(opts: GetHeadlinesOptions): Promise<ApiArticle[]> {
@@ -33,6 +34,7 @@ export async function getHeadlines(opts: GetHeadlinesOptions): Promise<ApiArticl
     show_thumbnails: true,
     view_mode: opts.viewMode ?? 'all_articles',
     sanitize: false,
+    search: opts.search ?? '',
   })
 }
 

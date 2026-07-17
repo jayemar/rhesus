@@ -1,6 +1,6 @@
 <template>
   <div class="article-list" ref="listEl" :style="pullVisualPx > 0 ? { transform: `translateY(${-pullVisualPx.toFixed(1)}px)` } : {}">
-    <div v-if="props.showSearch && feedsStore.selection && !articlesStore.loading" class="search-bar">
+    <div v-if="props.showSearch && feedsStore.selection" class="search-bar">
       <Search :size="13" class="search-icon" />
       <input
         ref="searchInputEl"
@@ -18,11 +18,11 @@
     </div>
     <div v-if="articlesStore.loading" class="state-msg">Loading...</div>
     <div v-else-if="!feedsStore.selection" class="state-msg">Select a feed to read</div>
+    <div v-else-if="clientFilteredArticles.length === 0 && searchQuery" class="state-msg">No articles matching "{{ searchQuery }}"</div>
     <div v-else-if="articles.length === 0" class="state-msg">No articles</div>
     <template v-else>
-      <div v-if="searchQuery && filteredArticles.length === 0" class="state-msg">No articles matching "{{ searchQuery }}"</div>
       <ArticleCard
-        v-for="article in filteredArticles"
+        v-for="article in clientFilteredArticles"
         :key="article.id"
         :article="article"
         :is-selected="selectedId === article.id"
@@ -72,7 +72,53 @@ const sentinelEl = ref<HTMLElement | null>(null)
 const searchInputEl = ref<HTMLInputElement | null>(null)
 const searchQuery = ref('')
 
-const filteredArticles = computed(() => {
+// Server-side search: TT-RSS's getHeadlines already supports a `search`
+// parameter that queries the full retained article history (GIN-indexed
+// full-text search, plus Gmail-style modifiers like title:/author:/
+// unread:true/@yesterday) - not just whatever's already loaded client-side.
+// Debounced so typing doesn't fire a request per keystroke; clearing the
+// query re-fires this with an empty string, which is a confirmed no-op
+// server-side, cleanly restoring the normal unfiltered list.
+//
+// Not used for the Unread view, though: that view already auto-loads every
+// page into memory (see articlesStore.load()'s loadAllPages() call), so a
+// server round-trip would just be slower than filtering what's already
+// there - see clientFilteredArticles below.
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+const isUnreadView = computed(() => feedsStore.selection?.viewMode === 'unread')
+
+// PostgreSQL full-text search matches whole (stemmed) words, not substrings
+// - a plain search for "ska" will NOT match "Skateboarding" (which stems to
+// "skateboard"), even though "ska" is visibly a substring of it, because
+// to_tsquery('ska') looks for the exact lexeme "ska". Appending ":*" makes
+// it a prefix match instead (to_tsquery('ska:*') matches any lexeme
+// starting with "ska", which "skateboard" does) - much closer to the
+// substring-ish matching a plain search box implies. Only applied when the
+// query looks like plain words with none of TT-RSS's own search syntax
+// (quotes, key:value modifiers, @dates, negation, explicit tsquery
+// operators) - if any of that's present, the query is sent untouched so a
+// user's own explicit syntax isn't altered.
+function buildSearchQuery(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed || /["@:&|!()-]/.test(trimmed)) return trimmed
+  return trimmed.split(/\s+/).map((w) => `${w}:*`).join(' ')
+}
+
+watch(searchQuery, (q) => {
+  if (isUnreadView.value) return
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    const sel = feedsStore.selection
+    if (!sel) return
+    void articlesStore.load(sel.id, sel.isCategory, sel.viewMode ?? 'all_articles', buildSearchQuery(q))
+  }, 300)
+})
+
+// Unread is already fully loaded in memory, so its search stays a plain
+// client-side filter - no debounce, no server round-trip needed.
+const clientFilteredArticles = computed(() => {
+  if (!isUnreadView.value) return articles.value
   const q = searchQuery.value.trim().toLowerCase()
   if (!q) return articles.value
   return articles.value.filter((a) =>

@@ -32,6 +32,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("previewFeed", $this);
         $host->add_api_method("getStarredCount", $this);
         $host->add_api_method("getLabelCounts", $this);
+        $host->add_api_method("getAllArticlesCount", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
         $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
         $host->add_hook(PluginHost::HOOK_RENDER_ARTICLE_API, $this);
@@ -406,6 +407,24 @@ class Rhesus_Settings extends Plugin {
             return [1, ["error" => "NOT_LOGGED_IN"]];
         }
         $sth = Db::pdo()->prepare("SELECT COUNT(*) AS count FROM ttrss_user_entries WHERE owner_uid = ? AND marked = true");
+        $sth->execute([$uid]);
+        $row = $sth->fetch();
+        return [0, ["count" => (int)($row['count'] ?? 0)]];
+    }
+
+    // Total (read + unread) article count across every feed for the current
+    // user - i.e. what "All articles" (feed_id -4) actually contains. Mirrors
+    // getStarredCount(): native TT-RSS's getFeedTree/getCounters only ever
+    // report unread-only counts, even for -4, which has no feed_id
+    // restriction of its own (TT-RSS's Feeds::_get_headlines() sets its
+    // match condition to unconditional "true" for -4), so this is simply
+    // every row for this user with no additional filter.
+    public function getAllArticlesCount(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $sth = Db::pdo()->prepare("SELECT COUNT(*) AS count FROM ttrss_user_entries WHERE owner_uid = ?");
         $sth->execute([$uid]);
         $row = $sth->fetch();
         return [0, ["count" => (int)($row['count'] ?? 0)]];

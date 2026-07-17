@@ -17,6 +17,7 @@ export const useArticlesStore = defineStore('articles', () => {
 
   const PAGE_SIZE = 200
   const currentViewMode = ref<string>('all_articles')
+  const currentSearch = ref('')
 
   const settingsStore = useSettingsStore()
 
@@ -26,10 +27,11 @@ export const useArticlesStore = defineStore('articles', () => {
       : 'newest'
   )
 
-  async function load(feedId: number, isCategory: boolean, viewMode = 'all_articles') {
+  async function load(feedId: number, isCategory: boolean, viewMode = 'all_articles', search = '') {
     currentFeedId.value = feedId
     currentIsCategory.value = isCategory
     currentViewMode.value = viewMode
+    currentSearch.value = search
     selectedId.value = null
     loading.value = true
     hasMore.value = true
@@ -38,7 +40,7 @@ export const useArticlesStore = defineStore('articles', () => {
     try {
       const results = await getHeadlines({
         feedId, isCategory, limit: PAGE_SIZE, skip: 0, sortOrder: sortOrder.value, viewMode,
-        dateSort: settingsStore.settings.date_sort,
+        dateSort: settingsStore.settings.date_sort, search,
       })
       articles.value = results
       hasMore.value = results.length === PAGE_SIZE
@@ -54,11 +56,13 @@ export const useArticlesStore = defineStore('articles', () => {
   }
 
   async function loadAllPages(feedId: number, isCategory: boolean, viewMode: string) {
+    const search = currentSearch.value
     while (hasMore.value) {
       if (
         currentFeedId.value !== feedId ||
         currentIsCategory.value !== isCategory ||
-        currentViewMode.value !== viewMode
+        currentViewMode.value !== viewMode ||
+        currentSearch.value !== search
       ) return
       await loadMore()
     }
@@ -76,6 +80,7 @@ export const useArticlesStore = defineStore('articles', () => {
         sortOrder: sortOrder.value,
         viewMode: currentViewMode.value,
         dateSort: settingsStore.settings.date_sort,
+        search: currentSearch.value,
       })
       articles.value.push(...results)
       hasMore.value = results.length === PAGE_SIZE

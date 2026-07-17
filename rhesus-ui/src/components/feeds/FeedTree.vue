@@ -109,7 +109,7 @@ const router = useRouter()
 const route = useRoute()
 const feedsStore = useFeedsStore()
 const articlesStore = useArticlesStore()
-const { tree, starredCount, labelCounts } = storeToRefs(feedsStore)
+const { tree, starredCount, labelCounts, allArticlesCount } = storeToRefs(feedsStore)
 
 const openCats = ref<Set<number>>(new Set())
 const labelToDelete = ref<ApiFeedTreeItem | null>(null)
@@ -188,6 +188,24 @@ function withLabelCounts(items: ApiFeedTreeItem[], counts: Record<number, number
   })
 }
 
+// Replaces the real "All articles" (bare_id -4) row's unread count with the
+// total article count instead - same rationale as withStarredCount/
+// withLabelCounts above. Must not touch the synthetic "Unread articles"
+// virtual row also using bare_id -4 (inserted below), which is
+// distinguished by having viewMode 'unread' set - that one should keep
+// showing the real unread-only count.
+function withAllArticlesCount(items: ApiFeedTreeItem[], count: number): ApiFeedTreeItem[] {
+  return items.map((item) => {
+    if (item.type === 'feed' && item.bare_id === -4 && item.viewMode !== 'unread') {
+      return { ...item, unread: count }
+    }
+    if (item.type === 'category' && item.items) {
+      return { ...item, items: withAllArticlesCount(item.items, count) }
+    }
+    return item
+  })
+}
+
 const treeWithUnread = computed(() => {
   const allArticlesFeed = findInTree(tree.value, -4)
   const virtual: ApiFeedTreeItem = {
@@ -200,8 +218,9 @@ const treeWithUnread = computed(() => {
     viewMode: 'unread',
   }
   const withVirtual = insertAfter(tree.value, -4, virtual)
+  const withAllCount = withAllArticlesCount(withVirtual, allArticlesCount.value)
   const starredTotal = Math.max(0, starredCount.value + articlesStore.starredCountDelta)
-  return withLabelCounts(withStarredCount(withVirtual, starredTotal), labelCounts.value)
+  return withLabelCounts(withStarredCount(withAllCount, starredTotal), labelCounts.value)
 })
 
 const organizedTree = computed((): TreeRow[] => {

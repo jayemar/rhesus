@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getFeedTree, getStarredCount, getLabelCounts } from '@/api/feeds'
+import { getFeedTree, getStarredCount, getLabelCounts, getAllArticlesCount } from '@/api/feeds'
 import type { ApiFeedTreeItem } from '@/types/api'
 import { useArticlesStore } from './articles'
 
@@ -17,6 +17,7 @@ export const useFeedsStore = defineStore('feeds', () => {
   const loading = ref(false)
   const starredCount = ref(0)
   const labelCounts = ref<Record<number, number>>({})
+  const allArticlesCount = ref(0)
 
   async function loadTree() {
     loading.value = true
@@ -25,7 +26,7 @@ export const useFeedsStore = defineStore('feeds', () => {
     } finally {
       loading.value = false
     }
-    await Promise.all([loadStarredCount(), loadLabelCounts()])
+    await Promise.all([loadStarredCount(), loadLabelCounts(), loadAllArticlesCount()])
   }
 
   // starredCount is the authoritative server total; articlesStore's
@@ -40,6 +41,10 @@ export const useFeedsStore = defineStore('feeds', () => {
 
   async function loadLabelCounts() {
     labelCounts.value = await getLabelCounts()
+  }
+
+  async function loadAllArticlesCount() {
+    allArticlesCount.value = await getAllArticlesCount()
   }
 
   // Applies an immediate local adjustment when a label is assigned/removed
@@ -58,7 +63,7 @@ export const useFeedsStore = defineStore('feeds', () => {
   }
 
   return {
-    tree, selection, loading, starredCount, labelCounts,
-    loadTree, loadStarredCount, loadLabelCounts, adjustLabelCount, select,
+    tree, selection, loading, starredCount, labelCounts, allArticlesCount,
+    loadTree, loadStarredCount, loadLabelCounts, loadAllArticlesCount, adjustLabelCount, select,
   }
 })

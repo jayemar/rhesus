@@ -23,6 +23,11 @@ export async function getLabelCounts(): Promise<Record<number, number>> {
   return res.counts
 }
 
+export async function getAllArticlesCount(): Promise<number> {
+  const res = await call<{ count: number }>('getAllArticlesCount')
+  return res.count
+}
+
 export async function getAllCategories(): Promise<ApiCategory[]> {
   return call<ApiCategory[]>('getCategories', { include_empty: true })
 }

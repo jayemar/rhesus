@@ -120,18 +120,29 @@ function decodeHtmlEntities(html: string): string {
   return el.value
 }
 
-const truncatedExcerpt = computed(() => {
-  let text = decodeHtmlEntities(props.article.excerpt ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+// Derived from the full content via the DOM rather than TT-RSS's own
+// server-computed excerpt field: that field is strip_tags()-based, which
+// only removes tag markup, not the text content of <style>/<script>
+// elements - a feed embedding inline CSS (e.g. a WordPress page-builder
+// raw-HTML block) ends up with the stylesheet rules as the excerpt's
+// leading "text". Parsing via the DOM lets us drop those elements
+// entirely, and as a side benefit also tokenizes malformed markup (an
+// unescaped apostrophe inside a single-quoted attribute, etc.) correctly.
+function excerptFromContent(content: string): string {
+  if (!content) return ''
+  const div = document.createElement('div')
+  div.innerHTML = content
+  div.querySelectorAll('style, script').forEach((el) => el.remove())
+  return (div.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
 
-  // Server-computed excerpt can come back empty even when the article has
-  // real text (e.g. TT-RSS's strip_tags()-based excerpt loses track of tag
-  // boundaries on malformed markup like an unescaped apostrophe inside a
-  // single-quoted attribute). Fall back to a DOM-parsed excerpt from the
-  // full content, which correctly tokenizes attributes regardless.
-  if (!text && props.article.content) {
-    const div = document.createElement('div')
-    div.innerHTML = props.article.content
-    text = (div.textContent ?? '').replace(/\s+/g, ' ').trim()
+const truncatedExcerpt = computed(() => {
+  let text = excerptFromContent(props.article.content ?? '')
+
+  // Only articles with no content at all (rare - e.g. enclosure-only
+  // entries) fall back to the server's own excerpt field.
+  if (!text) {
+    text = decodeHtmlEntities(props.article.excerpt ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
   }
 
   const max = excerptLines.value * 80

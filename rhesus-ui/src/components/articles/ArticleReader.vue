@@ -1262,6 +1262,13 @@ function processContent(html: string): string {
   })
   const sanitized = DOMPurify.sanitize(pre.body.innerHTML)
   const doc = new DOMParser().parseFromString(sanitized, 'text/html')
+  // A read-only sanitized article body has no legitimate use for an
+  // interactive <button> - some feeds (Substack's image zoom/enlarge
+  // controls, embedded directly in content:encoded) ship them anyway.
+  // DOMPurify's default allowlist permits <button>/<svg> as ordinary,
+  // non-dangerous HTML, so they survive sanitization and render as inert
+  // icon clutter unless removed here.
+  doc.querySelectorAll('button').forEach(el => el.remove())
   markPullQuotes(doc)
   doc.querySelectorAll('table').forEach(table => {
     const wrapper = doc.createElement('div')

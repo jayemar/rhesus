@@ -943,7 +943,10 @@ async function toggleFullContent() {
     // didn't provide - never to override real feed data.
     const jsonLdMeta = extractJsonLdMeta(doc)
     const meta: { author?: string, publishedAt?: number } = {}
-    if (!props.article.author && jsonLdMeta.author) {
+    // A URL in the author field (RTE Sport puts their Facebook page there,
+    // for one) isn't a byline - treat it the same as a missing author.
+    const feedAuthorIsUsable = !!props.article.author && !/^https?:\/\//i.test(props.article.author)
+    if (!feedAuthorIsUsable && jsonLdMeta.author) {
       meta.author = jsonLdMeta.author
     }
     // TT-RSS falls back to fetch time for `updated` when a feed provides no

@@ -327,7 +327,19 @@ function onFullContentMeta(meta: { author?: string, publishedAt?: number }) {
   fullContentMeta.value = meta
 }
 
-const readerAuthor = computed(() => selectedArticle.value?.author || fullContentMeta.value.author || '')
+// Some feeds (RTE Sport, at least) put their social-media page URL in the
+// author field instead of a byline - not a person's name, so don't show
+// it as one. Falls through to the JSON-LD fallback the same as if the
+// feed's author field were empty (see ArticleReader.vue's toggleFullContent()).
+function isUrlLike(value: string): boolean {
+  return /^https?:\/\//i.test(value)
+}
+
+const readerAuthor = computed(() => {
+  const feedAuthor = selectedArticle.value?.author ?? ''
+  const usableFeedAuthor = feedAuthor && !isUrlLike(feedAuthor) ? feedAuthor : ''
+  return usableFeedAuthor || fullContentMeta.value.author || ''
+})
 const readerDate = computed(() => fullContentMeta.value.publishedAt ?? selectedArticle.value?.updated ?? 0)
 
 const readerLinkDomain = computed(() =>

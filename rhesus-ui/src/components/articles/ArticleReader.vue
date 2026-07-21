@@ -674,6 +674,16 @@ async function saveNote() {
     articlesStore.setNote(props.article.id, note)
     currentNote.value = note
     showNote.value = false
+
+    // Adding a note to an otherwise-unorganized article (no labels, not
+    // starred) is a good signal it's worth keeping track of, so star it
+    // automatically. Only on adding real content, never on clearing the
+    // note back to empty (that's how a note gets "deleted" here - there's
+    // no separate delete action) - clearing shouldn't unstar, since the
+    // star may be there for a reason unrelated to the note by that point.
+    if (note && !props.article.marked && !articleHasLabels.value) {
+      articlesStore.toggleStar(props.article.id)
+    }
   } finally {
     noteSaving.value = false
   }

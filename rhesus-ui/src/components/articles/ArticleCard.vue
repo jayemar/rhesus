@@ -61,7 +61,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'
 import { writeToClipboard } from '@/utils/clipboard'
 import { externalLinkDomain, originOf } from '@/utils/url'
-import { stripInvisibleEntityArtifacts } from '@/utils/text'
+import { stripInvisibleEntityArtifacts, fixUnescapedCaptionQuotes } from '@/utils/text'
 import type { ApiArticle } from '@/types/api'
 
 const props = defineProps<{
@@ -132,7 +132,7 @@ function decodeHtmlEntities(html: string): string {
 function excerptFromContent(content: string): string {
   if (!content) return ''
   const div = document.createElement('div')
-  div.innerHTML = content
+  div.innerHTML = fixUnescapedCaptionQuotes(content)
   div.querySelectorAll('style, script').forEach((el) => el.remove())
   return stripInvisibleEntityArtifacts(div.textContent ?? '').replace(/\s+/g, ' ').trim()
 }

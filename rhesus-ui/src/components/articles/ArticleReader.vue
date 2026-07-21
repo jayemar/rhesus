@@ -331,6 +331,7 @@ import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullCont
 import { editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
 import { extractJsonLdMeta } from '@/utils/jsonld'
+import { stripInvisibleEntityArtifacts } from '@/utils/text'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
@@ -1068,7 +1069,7 @@ function isIconSizedImage(img: HTMLImageElement): boolean {
 // (Verge stores captions in data-caption rather than alt or figcaption).
 function parseHero(content: string): { src: string | null; alt: string; caption: string; bodyHtml: string } {
   const parser = new DOMParser()
-  const doc = parser.parseFromString(content, 'text/html')
+  const doc = parser.parseFromString(stripInvisibleEntityArtifacts(content), 'text/html')
 
   // Resolve relative image/link URLs (e.g. a site emitting <img src="../media/x.jpg">)
   // before picking a hero candidate - otherwise a relative src extracted here would
@@ -1238,7 +1239,7 @@ function embedPlatformName(url: string): string {
 function processContent(html: string): string {
   // Preprocess before DOMPurify strips data-* attributes: move data-caption
   // into alt (for lightbox) and figcaption (for below-image display) when empty.
-  const pre = new DOMParser().parseFromString(html, 'text/html')
+  const pre = new DOMParser().parseFromString(stripInvisibleEntityArtifacts(html), 'text/html')
   pre.querySelectorAll('img[src]').forEach(el => {
     const src = el.getAttribute('src') ?? ''
     if (src === 'undefined' || src === '' || src === 'null' || /\/tracking[/.]|[-_]pixel\./i.test(src))

@@ -109,7 +109,7 @@ const router = useRouter()
 const route = useRoute()
 const feedsStore = useFeedsStore()
 const articlesStore = useArticlesStore()
-const { tree, starredCount, labelCounts, allArticlesCount } = storeToRefs(feedsStore)
+const { tree, starredCount, labelCounts, allArticlesCount, feedCounters, categoryCounters } = storeToRefs(feedsStore)
 
 const openCats = ref<Set<number>>(new Set())
 const labelToDelete = ref<ApiFeedTreeItem | null>(null)
@@ -153,6 +153,39 @@ function findInTree(items: ApiFeedTreeItem[], bareId: number): ApiFeedTreeItem |
     }
   }
   return undefined
+}
+
+// getFeedTree's own "unread" field is a real number only for the hardcoded
+// virtual feeds under "Special"/"Labels" - for every ordinary subscribed
+// feed or user category it's a bogus -1 sentinel (confirmed directly
+// against a live server response), which silently suppressed the sidebar's
+// unread badge for every regular feed (indistinguishable from a genuine
+// zero, since both hide the badge). feedCounters/categoryCounters (from
+// the dedicated getCounters() call TT-RSS's own web client relies on for
+// exactly this) carry the real numbers. Only overwrites entries that
+// actually need it - the already-correct virtual/label rows are left
+// alone, avoiding any behavioral change from timing skew between the two
+// separate API calls.
+function withRealUnreadCounts(
+  items: ApiFeedTreeItem[],
+  feedCounters: Record<number, number>,
+  categoryCounters: Record<number, number>,
+): ApiFeedTreeItem[] {
+  return items.map((item) => {
+    if (item.type === 'category') {
+      const real = item.unread < 0 ? categoryCounters[item.bare_id] : undefined
+      return {
+        ...item,
+        ...(real !== undefined ? { unread: real } : {}),
+        items: item.items ? withRealUnreadCounts(item.items, feedCounters, categoryCounters) : item.items,
+      }
+    }
+    if (item.type === 'feed' && item.unread < 0) {
+      const real = feedCounters[item.bare_id]
+      if (real !== undefined) return { ...item, unread: real }
+    }
+    return item
+  })
 }
 
 // Replaces the Starred (bare_id -1) feed item's unread count with the total
@@ -207,7 +240,8 @@ function withAllArticlesCount(items: ApiFeedTreeItem[], count: number): ApiFeedT
 }
 
 const treeWithUnread = computed(() => {
-  const allArticlesFeed = findInTree(tree.value, -4)
+  const withRealCounts = withRealUnreadCounts(tree.value, feedCounters.value, categoryCounters.value)
+  const allArticlesFeed = findInTree(withRealCounts, -4)
   const virtual: ApiFeedTreeItem = {
     id: 'virtual-unread',
     name: 'Unread articles',
@@ -217,7 +251,7 @@ const treeWithUnread = computed(() => {
     icon: false,
     viewMode: 'unread',
   }
-  const withVirtual = insertAfter(tree.value, -4, virtual)
+  const withVirtual = insertAfter(withRealCounts, -4, virtual)
   const withAllCount = withAllArticlesCount(withVirtual, allArticlesCount.value)
   const starredTotal = Math.max(0, starredCount.value + articlesStore.starredCountDelta)
   return withLabelCounts(withStarredCount(withAllCount, starredTotal), labelCounts.value)

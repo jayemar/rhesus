@@ -216,6 +216,27 @@ const pullUpDist = ref(0)
 const pullVisualPx = ref(0)
 const PULL_WHEEL = 300
 const PULL_TOUCH = window.innerHeight * 0.2
+// How much extra "give" the rubber-band curve allows past PULL_TOUCH -
+// smaller means it saturates (slows down) sooner.
+const PULL_ELASTIC_RANGE = PULL_TOUCH * 0.6
+
+// Standard rubber-band/overscroll resistance curve (the same shape iOS's
+// UIScrollView bounce uses): near overpull=0 the slope is ~1 (tracks the
+// finger directly), and as overpull grows the result asymptotically
+// approaches `range` - i.e. further dragging keeps slowing down rather than
+// tracking 1:1 or hitting a hard stop.
+function rubberBand(overpull: number, range: number): number {
+  return (overpull * range) / (overpull + range)
+}
+
+// Maps a raw drag distance to the visual pixel offset the list is translated
+// by: quick, ~1:1 tracking up to the natural trigger distance (PULL_TOUCH),
+// then elastic, diminishing-return resistance beyond it.
+function pullVisualOffset(dy: number): number {
+  if (dy <= 0) return 0
+  if (dy <= PULL_TOUCH) return dy
+  return PULL_TOUCH + rubberBand(dy - PULL_TOUCH, PULL_ELASTIC_RANGE)
+}
 
 const pullUpReady = computed(() => pullUpDist.value >= 1)
 const pullActionLabel = computed(() =>
@@ -310,9 +331,9 @@ function onTouchMove(e: TouchEvent) {
   if (!touchAtBottom || !feedsStore.selection) return
   const dy = touchStartY - (e.touches[0]?.clientY ?? touchStartY)
   pullUpDist.value = dy > 0 ? Math.min(dy / PULL_TOUCH, 1) : 0
-  // Track the finger 1:1 (capped at the threshold distance) instead of a
-  // fixed small nudge, so the list visually follows the drag.
-  pullVisualPx.value = dy > 0 ? Math.min(dy, PULL_TOUCH) : 0
+  // Tracks the finger 1:1 up to the trigger distance, then eases into
+  // elastic overscroll resistance beyond it - see pullVisualOffset().
+  pullVisualPx.value = pullVisualOffset(dy)
 }
 
 function onTouchEnd() {

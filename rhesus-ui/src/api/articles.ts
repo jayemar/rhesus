@@ -116,3 +116,9 @@ export async function fetchFullContent(
 ): Promise<{ content: string; url: string }> {
   return call('fetchFullContent', { article_id: articleId })
 }
+
+export async function refetchArticle(
+  articleId: number,
+): Promise<{ success: boolean; changed: boolean }> {
+  return call('refetchArticle', { article_id: articleId })
+}

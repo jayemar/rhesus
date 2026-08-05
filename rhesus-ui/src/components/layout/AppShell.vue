@@ -21,13 +21,6 @@
           @pointerdown="onIconBtnPointerDown"
           @click="showArticleSearch = !showArticleSearch"
         ><Search :size="16" /></button>
-        <button
-          v-if="feedsStore.selection"
-          class="icon-btn"
-          title="Mark all as read"
-          @pointerdown="onIconBtnPointerDown"
-          @click="confirmMarkAll = true"
-        ><CheckCheck :size="16" /></button>
         <button class="icon-btn" title="Refresh" @pointerdown="onIconBtnPointerDown" @click="refresh"><RefreshCw :size="16" /></button>
         <button class="icon-btn" :title="themeLabel" @pointerdown="onIconBtnPointerDown" @click="toggleTheme">
           <Sun v-if="effectiveTheme === 'dark'" :size="16" />
@@ -38,8 +31,23 @@
           <Maximize2 v-else :size="16" />
         </button>
         <button class="icon-btn" title="Settings" @pointerdown="onIconBtnPointerDown" @click="toggleSettings"><Settings :size="16" /></button>
+        <button class="icon-btn" title="More options" @pointerdown="onIconBtnPointerDown" @click="openMoreMenu">
+          <MoreVertical :size="16" />
+        </button>
       </div>
     </header>
+
+    <div v-if="showMoreMenu" class="more-menu-backdrop" @click="showMoreMenu = false" />
+    <div v-if="showMoreMenu" class="more-menu-popup" :style="moreMenuStyle" @click.stop>
+      <button v-if="feedsStore.selection" class="more-menu-option" @click="showMoreMenu = false; confirmMarkAll = true">
+        <CheckCheck :size="14" /> Mark all as read
+      </button>
+      <button class="more-menu-option" @click="showMoreMenu = false; showAddFeedDialog = true">
+        <Rss :size="14" /> Add feed
+      </button>
+    </div>
+
+    <AddFeedDialog v-if="showAddFeedDialog" @close="showAddFeedDialog = false" />
 
     <!-- Sidebar -->
     <aside class="sidebar">
@@ -178,7 +186,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { VNode } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter, MoreVertical } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
@@ -188,6 +196,7 @@ import { useAuthStore } from '@/stores/auth'
 import FeedTree from '@/components/feeds/FeedTree.vue'
 import FeedEditor from '@/components/feeds/FeedEditor.vue'
 import FilterManager from '@/components/filters/FilterManager.vue'
+import AddFeedDialog from '@/components/feeds/AddFeedDialog.vue'
 import ArticleList from '@/components/articles/ArticleList.vue'
 import ArticleReader from '@/components/articles/ArticleReader.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
@@ -195,6 +204,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { browserShowsNativeToast } from '@/utils/clipboard'
 import { externalLinkDomain, originOf } from '@/utils/url'
 import { blankRule, escapeRegExp } from '@/utils/filterDefaults'
+import { anchorPopupStyle } from '@/utils/popup'
 import type { ApiFeedTreeItem, ApiFilter, UiSettings } from '@/types/api'
 
 const appVersion = __APP_VERSION__
@@ -234,15 +244,31 @@ watchEffect(() => {
   const sel = selection.value
   if (!sel) { baseServerUnread.value = 0; return }
   // Starred is a total-count feed (see feedsStore.starredCount), not an
-  // unread-count one like every other feed - the tree only ever carries
-  // unread-only counts from the server (see FeedTree.vue's withStarredCount
-  // for why), so this can't be read off `node.unread` the normal way.
+  // unread-count one like every other feed, so this can't come from the
+  // regular counters lookup below.
   if (sel.id === -1 && !sel.isCategory) {
     baseServerUnread.value = feedsStore.starredCount
     return
   }
+  // getFeedTree's own "unread" field is a real number only for the
+  // hardcoded virtual feeds under "Special" - for every ordinary feed or
+  // user category it's a bogus -1 sentinel (confirmed directly against a
+  // live server response), which silently hid the header badge for any
+  // regular feed/category selection. feedCounters/categoryCounters (from
+  // the dedicated getCounters() call - see api/feeds.ts) carry the real
+  // numbers TT-RSS's own web client cross-references instead. Feed and
+  // category ids share the same positive-integer namespace, so which map
+  // to check depends on sel.isCategory.
+  const real = sel.isCategory ? feedsStore.categoryCounters[sel.id] : feedsStore.feedCounters[sel.id]
+  if (real !== undefined) {
+    baseServerUnread.value = real
+    articlesStore.readCountDelta = 0
+    return
+  }
+  // Fallback for anything getCounters() hasn't caught up with yet (e.g. a
+  // feed subscribed moments ago, before the next counters refresh).
   const node = findInTree(tree.value, sel.id)
-  if (node) {
+  if (node && node.unread >= 0) {
     baseServerUnread.value = node.unread
     articlesStore.readCountDelta = 0
   }
@@ -263,6 +289,9 @@ const confirmLogout = ref(false)
 const showSettings = ref(false)
 const showFeedEditor = ref(false)
 const showFilterManager = ref(false)
+const showMoreMenu = ref(false)
+const moreMenuStyle = ref<Record<string, string>>({})
+const showAddFeedDialog = ref(false)
 const filterManagerInitialFilter = ref<Partial<ApiFilter> | null>(null)
 const showArticleSearch = ref(false)
 const copyToast = ref<string | null>(null)
@@ -403,6 +432,21 @@ watch(
       : findTitle(tree.value, id, isCategory) ?? (isCategory ? 'Category' : 'Feed')
     feedsStore.select({ id, isCategory, title, viewMode: vm === 'all_articles' ? undefined : vm })
     articlesStore.load(id, isCategory, vm)
+    // articlesStore.load() unconditionally resets readCountDelta (the local
+    // "articles read since the last real count" compensator) on every
+    // navigation, including navigating back to a view already visited this
+    // session - but feedCounters/categoryCounters (the header/sidebar
+    // unread counts' actual baseline) only ever get refreshed by an
+    // explicit loadTree() call (mount, pull-to-refresh, mark-all-read,
+    // etc.), not by ordinary navigation. Without this, going Unread -> a
+    // feed's own view (e.g. via an article's source link) -> back to
+    // Unread wiped the delta that was correctly discounting already-read
+    // articles, while the stale pre-navigation count underneath it was
+    // never updated - so the header/sidebar reverted to an inflated,
+    // out-of-date number even though the article list itself reloads
+    // correctly. Refreshing just the counters (not the whole tree
+    // structure) on every navigation keeps both in sync cheaply.
+    void feedsStore.loadFeedCounters()
   },
   { immediate: true },
 )
@@ -579,6 +623,13 @@ function toggleFilterManager() {
   showFeedEditor.value = false
   showFilterManager.value = !showFilterManager.value
   if (showFilterManager.value) settings.value.sidebar_collapsed = true
+}
+
+function openMoreMenu(event: MouseEvent) {
+  if (showMoreMenu.value) { showMoreMenu.value = false; return }
+  const btn = event.currentTarget as HTMLElement
+  moreMenuStyle.value = anchorPopupStyle(btn.getBoundingClientRect(), 200)
+  showMoreMenu.value = true
 }
 
 function onCreateFilterFromTags(tags: string[]) {
@@ -804,6 +855,38 @@ async function refresh() {
   color: var(--color-text-primary);
 }
 
+.more-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+.more-menu-popup {
+  position: fixed;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  z-index: 200;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.more-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  transition: background var(--transition-fast);
+  white-space: nowrap;
+}
+
+.more-menu-option:hover {
+  background: var(--color-surface);
+}
 
 .sidebar {
   position: fixed;

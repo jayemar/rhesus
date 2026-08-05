@@ -252,6 +252,9 @@
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
         <button class="share-option" @click="openFeedEditDialog">Edit feed</button>
+        <button class="share-option" :disabled="refetching" @click="refetchCurrentArticle">
+          {{ refetching ? 'Refetching...' : 'Refetch article' }}
+        </button>
       </div>
       <div v-if="moreCatOpen" class="font-backdrop" @click="moreCatOpen = false" />
       <div v-if="moreCatOpen" class="font-dropdown" :style="moreCatDropdownStyle" @click.stop>
@@ -327,11 +330,12 @@ import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
 import { useSettingsStore } from '@/stores/settings'
-import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
+import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent, refetchArticle } from '@/api/articles'
 import { editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
 import { extractJsonLdMeta } from '@/utils/jsonld'
 import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes } from '@/utils/text'
+import { anchorPopupStyle } from '@/utils/popup'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
@@ -354,21 +358,6 @@ const fontOptions = [
   { value: 'merriweather', label: 'Merriweather', fontFamily: "'Merriweather', serif" },
   { value: 'lora', label: 'Lora', fontFamily: "'Lora', serif" },
 ]
-
-// Anchors a fixed-position popup next to the button that opened it, flipping
-// to open upward when the button sits in the lower half of the viewport (e.g.
-// the floating toolbar near the bottom of the screen) so the popup doesn't
-// run off-screen.
-function anchorPopupStyle(rect: DOMRect, width: number): Record<string, string> {
-  let left = rect.left + rect.width / 2 - width / 2
-  left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
-  const spaceBelow = window.innerHeight - rect.bottom
-  const spaceAbove = rect.top
-  if (spaceBelow < spaceAbove) {
-    return { bottom: `${window.innerHeight - rect.top + 8}px`, left: `${left}px`, width: `${width}px` }
-  }
-  return { top: `${rect.bottom + 8}px`, left: `${left}px`, width: `${width}px` }
-}
 
 const moreFontOpen = ref(false)
 const moreFontDropdownStyle = ref<Record<string, string>>({})
@@ -632,7 +621,7 @@ function onLightboxKey(e: KeyboardEvent) {
 function onContentClick(e: MouseEvent) {
   const img = (e.target as HTMLElement).closest('img')
   if (img) {
-    const caption = (img as HTMLImageElement).alt
+    const caption = stripHtml((img as HTMLImageElement).alt)
       || stripHtml(img.closest('figure')?.querySelector('figcaption')?.textContent?.trim() ?? '')
       || ''
     openLightbox((img as HTMLImageElement).src, caption)
@@ -921,6 +910,28 @@ function openInNewTab() {
   if (props.article.link) window.open(props.article.link, '_blank', 'noopener,noreferrer')
 }
 
+const refetching = ref(false)
+
+async function refetchCurrentArticle() {
+  if (refetching.value) return
+  refetching.value = true
+  try {
+    const result = await refetchArticle(props.article.id)
+    if (result.changed) {
+      await articlesStore.fetchContent(props.article.id)
+      emit('copied', 'Article refetched and updated')
+    } else {
+      emit('copied', 'Article refetched - no changes found')
+    }
+  } catch (e) {
+    console.error('refetchArticle failed:', e)
+    emit('copied', 'Refetch failed - see console for details')
+  } finally {
+    refetching.value = false
+    showMoreMenu.value = false
+  }
+}
+
 const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 
 async function nativeShare() {
@@ -1081,6 +1092,21 @@ function parseHero(content: string): { src: string | null; alt: string; caption:
   const parser = new DOMParser()
   const doc = parser.parseFromString(fixUnescapedDataAttributeQuotes(stripInvisibleEntityArtifacts(content)), 'text/html')
 
+  // Strip images with a broken/sentinel src BEFORE resolving relative URLs
+  // below - some feeds ship a template that never got its image URL filled
+  // in (e.g. NPR emitting <img src="undefined" alt="...caption...">
+  // literally). "undefined" has no scheme, so resolveRelativeUrls() would
+  // otherwise happily rewrite it into a plausible-looking absolute URL
+  // (resolved against the article's own link, e.g. ".../undefined"),
+  // which then passes every later "is this broken?" check and gets wrongly
+  // selected as the hero image - confirmed directly against a real NPR
+  // article that did exactly this.
+  doc.querySelectorAll('img[src]').forEach(el => {
+    const src = el.getAttribute('src') ?? ''
+    if (src === 'undefined' || src === '' || src === 'null' || /\/tracking[/.]|[-_]pixel\./i.test(src))
+      el.remove()
+  })
+
   // Resolve relative image/link URLs (e.g. a site emitting <img src="../media/x.jpg">)
   // before picking a hero candidate - otherwise a relative src extracted here would
   // never go through processContent()'s own resolveRelativeUrls() call, since that
@@ -1091,7 +1117,14 @@ function parseHero(content: string): { src: string | null; alt: string; caption:
     if (isIconSizedImage(img)) continue
 
     const dcText = stripHtml(img.getAttribute('data-caption') ?? '')
-    const alt = img.getAttribute('alt') ?? ''
+    // Some sites (The Verge's live pages, for one) put HTML-entity-escaped
+    // markup directly inside alt text itself (e.g. alt="&lt;em&gt;caption
+    // text&lt;/em&gt;") - since alt is semantically always plain text, and
+    // becomes visible as-is (raw decoded entities included) whenever it's
+    // shown directly (a failed image's fallback rendering, the lightbox
+    // caption below), strip any embedded tags the same way data-caption
+    // already is.
+    const alt = stripHtml(img.getAttribute('alt') ?? '')
     let src: string | null = null
 
     // Prefer <source data-srcset|srcset> from a parent <picture>: lazy-loaded images
@@ -1205,6 +1238,13 @@ function fallbackEmptyEmbeds(doc: Document) {
     'blockquote.fb-xfbml-parse-ignore',
     'div.fb-video',
     'div.fb-post',
+    // A <canvas> element (e.g. a Chart.js graph) is only ever populated by
+    // JavaScript, which never runs here - it otherwise sits as a large,
+    // completely blank box reserving its declared width/height (a "hero
+    // image" -shaped gap with nothing in it). No permalink-style attribute
+    // to recover a source link from, so this always falls through to the
+    // plain "content removed" note below rather than a "View on..." link.
+    'canvas',
   ].join(',')
   doc.querySelectorAll(selector).forEach((el) => {
     // Some platforms (Twitter's static fallback markup, most TikTok embeds)
@@ -1734,6 +1774,15 @@ watch(
 
 :global(.share-option:hover) {
   background: var(--color-surface);
+}
+
+:global(.share-option:disabled) {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+:global(.share-option:disabled:hover) {
+  background: none;
 }
 
 :global(.share-option--font) {

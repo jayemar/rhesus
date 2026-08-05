@@ -33,6 +33,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("getStarredCount", $this);
         $host->add_api_method("getLabelCounts", $this);
         $host->add_api_method("getAllArticlesCount", $this);
+        $host->add_api_method("refetchArticle", $this);
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
         $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
         $host->add_hook(PluginHost::HOOK_RENDER_ARTICLE_API, $this);
@@ -52,7 +53,37 @@ class Rhesus_Settings extends Plugin {
             $article['date_entered'] = $date_entered ? (int)strtotime($date_entered) : null;
         }
 
+        // Must run here, before this function returns - classes/API.php calls
+        // DiskCache::rewrite_urls() immediately after HOOK_RENDER_ARTICLE_API
+        // fires, which re-parses $article['content'] with PHP's own
+        // DOMDocument (libxml). Some WordPress sites (The Verge, at least)
+        // build a data-caption/data-portal-copyright attribute by escaping an
+        // embedded <a href="...">...</a> but forgetting to also escape the
+        // anchor's OWN quotes - libxml recovers from that far more
+        // destructively than a real browser does: it truncates the whole
+        // <img> tag right at the embedded quote, and everything that should
+        // have been the rest of the attribute value (plus the tag's other
+        // attributes and closing bracket) leaks out as literal, visible body
+        // text in the API response - confirmed directly against a real
+        // article and TT-RSS's own served (not just stored) content. Rhesus's
+        // client-side equivalent of this fix runs too late to help here: by
+        // the time the browser gets the response, libxml has already
+        // destroyed the original tag structure with no way to reconstruct it.
+        if (isset($article['content']) && is_string($article['content'])) {
+            $article['content'] = $this->fix_unescaped_data_attribute_quotes($article['content']);
+        }
+
         return $article;
+    }
+
+    private function fix_unescaped_data_attribute_quotes(string $html): string {
+        return preg_replace_callback(
+            '#(data-[\w-]+)="([\s\S]*?)"(?=\s+(?:data-[\w-]+=|src=|alt=|title=|fetchpriority=|class=|id=|width=|height=)|\s*/?>)#',
+            function ($m) {
+                return $m[1] . '="' . str_replace('"', '&quot;', $m[2]) . '"';
+            },
+            $html
+        );
     }
 
     // Fix common XML malformations in raw feed content before LibXML parsing.
@@ -646,14 +677,113 @@ class Rhesus_Settings extends Plugin {
         return [0, ["content" => $html, "url" => $url]];
     }
 
+    // Forces a full re-fetch and re-ingest of the feed this article belongs
+    // to, bypassing two things that would otherwise make this a no-op:
+    // TT-RSS's content-hash short-circuit (RSSUtils::update_rss_feed()
+    // normally skips HOOK_ARTICLE_FILTER entirely - and leaves the stored
+    // row untouched - when the feed's raw item content hash hasn't changed
+    // since last fetch) and HTTP conditional-GET caching (which could
+    // otherwise return an empty 304 body). Both are opt-out via the same
+    // force_rehash/force_refetch request flags TT-RSS's own "Force refetch/
+    // Force rehash" debug feed options use. This lets already-stored
+    // articles pick up fixes to import-time content processing (ours or
+    // any other plugin's) that would otherwise only apply to articles
+    // fetched from now on - the render-time fix in hook_render_article_api()
+    // above doesn't need this, but not every fix is implemented there.
+    // Called via: POST /tt-rss/api/ {"op":"refetchArticle","sid":"...","article_id":N}
+    public function refetchArticle(): array {
+        $article_id = (int)($_REQUEST['article_id'] ?? 0);
+        if (!$article_id) {
+            return [1, ["error" => "MISSING_ARTICLE_ID"]];
+        }
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+
+        $sth = Db::pdo()->prepare(
+            "SELECT ttrss_user_entries.feed_id, ttrss_entries.content_hash
+             FROM ttrss_user_entries
+             JOIN ttrss_entries ON ttrss_entries.id = ttrss_user_entries.ref_id
+             WHERE ttrss_user_entries.ref_id = ? AND ttrss_user_entries.owner_uid = ?
+             LIMIT 1"
+        );
+        $sth->execute([$article_id, $uid]);
+        $row = $sth->fetch();
+
+        if (!$row || !$row['feed_id']) {
+            return [1, ["error" => "ARTICLE_NOT_FOUND"]];
+        }
+
+        $feed_id = (int)$row['feed_id'];
+        $hash_before = $row['content_hash'];
+
+        $prev_force_rehash = $_REQUEST['force_rehash'] ?? null;
+        $prev_force_refetch = $_REQUEST['force_refetch'] ?? null;
+        $_REQUEST['force_rehash'] = true;
+        $_REQUEST['force_refetch'] = true;
+
+        try {
+            $ok = RSSUtils::update_rss_feed($feed_id);
+        } finally {
+            if ($prev_force_rehash === null) {
+                unset($_REQUEST['force_rehash']);
+            } else {
+                $_REQUEST['force_rehash'] = $prev_force_rehash;
+            }
+            if ($prev_force_refetch === null) {
+                unset($_REQUEST['force_refetch']);
+            } else {
+                $_REQUEST['force_refetch'] = $prev_force_refetch;
+            }
+        }
+
+        if (!$ok) {
+            return [1, ["error" => "FETCH_FAILED"]];
+        }
+
+        $sth = Db::pdo()->prepare("SELECT content_hash FROM ttrss_entries WHERE id = ?");
+        $sth->execute([$article_id]);
+        $hash_after = $sth->fetchColumn();
+
+        return [0, [
+            "success" => true,
+            "changed" => $hash_after !== $hash_before,
+        ]];
+    }
+
+    // Exact hostnames (comma-separated, e.g. "centre.example.ts.net,nas.lan")
+    // exempted from the non-standard-port and private/reserved-IP checks
+    // below. Server-operator config only, via RHESUS_TRUSTED_URL_HOSTS in
+    // .env - never hardcoded here, since what counts as "trusted" is
+    // specific to each deployment. Exact match only (not a domain suffix):
+    // e.g. trusting centre.example.ts.net doesn't also trust other devices
+    // on the same tailnet. Empty/unset by default, so this is opt-in and
+    // changes nothing unless explicitly configured.
+    private function trustedUrlHosts(): array {
+        $raw = getenv('RHESUS_TRUSTED_URL_HOSTS') ?: '';
+        $hosts = [];
+        foreach (explode(',', $raw) as $h) {
+            $h = strtolower(trim($h));
+            if ($h !== '') $hosts[] = $h;
+        }
+        return $hosts;
+    }
+
+    private function hostIsTrustedUrlHost(string $host): bool {
+        return in_array(strtolower($host), $this->trustedUrlHosts(), true);
+    }
+
     // Fetches url and, if HTML with exactly one autodiscovery feed link, returns
     // the discovered feed URL. Otherwise returns the original URL unchanged.
     // Works around a TT-RSS bug where subscribeToFeed returns code 6 because it
     // fails to re-fetch content after extracting the autodiscovered feed URL.
     // Blocks anything other than plain http(s) on standard ports, and any
-    // hostname resolving to a private/reserved IP (SSRF protection) -
-    // resolveSubscribeUrl(), previewFeed(), and fetchIconFromUrl() all fetch
-    // a user-supplied URL server-side, so all three need this.
+    // hostname resolving to a private/reserved IP (SSRF protection), unless
+    // the hostname is an operator-configured trusted host (see
+    // trustedUrlHosts() above) - resolveSubscribeUrl(), previewFeed(), and
+    // fetchIconFromUrl() all fetch a user-supplied URL server-side, so all
+    // three need this.
     private function validateFetchUrl(string $url): ?string {
         $parsed = parse_url($url);
         $scheme = strtolower($parsed['scheme'] ?? '');
@@ -661,6 +791,11 @@ class Rhesus_Settings extends Plugin {
             return "INVALID_URL";
         }
         $host = $parsed['host'] ?? '';
+
+        if ($this->hostIsTrustedUrlHost($host)) {
+            return null;
+        }
+
         $port = isset($parsed['port']) ? (int)$parsed['port'] : ($scheme === 'https' ? 443 : 80);
         if ($port !== 80 && $port !== 443) {
             return "INVALID_URL";

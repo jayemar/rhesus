@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getFeedTree, getStarredCount, getLabelCounts, getAllArticlesCount } from '@/api/feeds'
+import { getFeedTree, getStarredCount, getLabelCounts, getAllArticlesCount, getCounters } from '@/api/feeds'
 import type { ApiFeedTreeItem } from '@/types/api'
 import { useArticlesStore } from './articles'
 
@@ -18,6 +18,11 @@ export const useFeedsStore = defineStore('feeds', () => {
   const starredCount = ref(0)
   const labelCounts = ref<Record<number, number>>({})
   const allArticlesCount = ref(0)
+  // Real per-feed/per-category unread counts from getCounters() - see that
+  // function's doc comment for why this can't just be read off getFeedTree's
+  // own "unread" field for ordinary feeds/categories.
+  const feedCounters = ref<Record<number, number>>({})
+  const categoryCounters = ref<Record<number, number>>({})
 
   async function loadTree() {
     loading.value = true
@@ -26,7 +31,13 @@ export const useFeedsStore = defineStore('feeds', () => {
     } finally {
       loading.value = false
     }
-    await Promise.all([loadStarredCount(), loadLabelCounts(), loadAllArticlesCount()])
+    await Promise.all([loadStarredCount(), loadLabelCounts(), loadAllArticlesCount(), loadFeedCounters()])
+  }
+
+  async function loadFeedCounters() {
+    const counters = await getCounters()
+    feedCounters.value = counters.feeds
+    categoryCounters.value = counters.categories
   }
 
   // starredCount is the authoritative server total; articlesStore's
@@ -63,7 +74,7 @@ export const useFeedsStore = defineStore('feeds', () => {
   }
 
   return {
-    tree, selection, loading, starredCount, labelCounts, allArticlesCount,
-    loadTree, loadStarredCount, loadLabelCounts, loadAllArticlesCount, adjustLabelCount, select,
+    tree, selection, loading, starredCount, labelCounts, allArticlesCount, feedCounters, categoryCounters,
+    loadTree, loadStarredCount, loadLabelCounts, loadAllArticlesCount, loadFeedCounters, adjustLabelCount, select,
   }
 })

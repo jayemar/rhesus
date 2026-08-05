@@ -28,6 +28,34 @@ export async function getAllArticlesCount(): Promise<number> {
   return res.count
 }
 
+export interface FeedCounters {
+  feeds: Record<number, number>
+  categories: Record<number, number>
+}
+
+// getFeedTree's own "unread" field is a real number only for the hardcoded
+// virtual feeds under "Special" (All articles, Starred, etc.) - for every
+// ordinary subscribed feed or user category it's a bogus -1 sentinel
+// (confirmed directly against this server's own getFeedTree response).
+// TT-RSS's native web client never reads unread counts from getFeedTree at
+// all - it always cross-references this separate getCounters call instead,
+// which is what actually computes real per-feed/per-category unread totals.
+// Feed and category ids share the same positive-integer namespace, so a
+// counters entry only means "category" when its `kind` field says so;
+// entries with no `kind` cover everything else (ordinary feeds, labels,
+// and the virtual system feeds alike).
+export async function getCounters(): Promise<FeedCounters> {
+  const res = await call<Array<{ id?: number | string; counter?: number; kind?: string }>>('getCounters')
+  const feeds: Record<number, number> = {}
+  const categories: Record<number, number> = {}
+  for (const c of res) {
+    if (typeof c.id !== 'number' || typeof c.counter !== 'number') continue
+    if (c.kind === 'cat') categories[c.id] = c.counter
+    else feeds[c.id] = c.counter
+  }
+  return { feeds, categories }
+}
+
 export async function getAllCategories(): Promise<ApiCategory[]> {
   return call<ApiCategory[]>('getCategories', { include_empty: true })
 }

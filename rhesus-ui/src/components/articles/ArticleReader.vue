@@ -1550,6 +1550,14 @@ watch(
   color: var(--color-text-secondary);
 }
 
+/* .reader-content :deep(p) gives every paragraph its own margin-bottom,
+   which stacks with the blockquote's own padding-bottom for whichever
+   paragraph happens to be last inside it - padding-top has no equivalent
+   margin-top to stack with, so the box reads as visibly bottom-heavy. */
+.reader-content :deep(blockquote p:last-child) {
+  margin-bottom: 0;
+}
+
 /* Pull quotes are typographic emphasis (often a sentence repeated from the
    surrounding body), not a real quotation like <blockquote> - top/bottom
    rules instead of a left border keeps the two visually distinct. */

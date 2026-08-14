@@ -134,3 +134,49 @@ test('note editor save button has dark text in dark mode', async ({ page }) => {
 
   await expect(page.locator('.reader-note-save')).toHaveCSS('color', 'rgb(26, 26, 26)')
 })
+
+test('opening the note editor does not scroll the reader while scrolled into the article', async ({ page }) => {
+  // .reader-scroll is its own overflow-y:auto container (not window) - find
+  // an article with enough content to actually be scrollable within it.
+  const scrollEl = page.locator('.reader-scroll')
+  let scrollBefore = 0
+
+  for (let i = 0; i < 10; i++) {
+    await page.locator('.card').nth(i).click()
+    await expect(page.locator('.reader-overlay')).toBeVisible({ timeout: 10000 })
+
+    await scrollEl.evaluate((el) => { el.scrollTop = 600 })
+    await page.waitForTimeout(150)
+    scrollBefore = await scrollEl.evaluate((el) => el.scrollTop)
+
+    if (scrollBefore > 100) break
+    await page.locator('.reader-close').click()
+  }
+
+  expect(scrollBefore).toBeGreaterThan(100)
+
+  // Deliberately a raw JS .click(), not Playwright's locator.click() -
+  // Playwright's click performs its own actionability/scroll-into-view
+  // check before dispatching, which gets confused by .reader-toolbar being
+  // position:fixed but a DOM descendant of .reader-scroll (fixed elements
+  // are visually unaffected by their scrolling ancestor, but Playwright's
+  // "is this in view" logic doesn't account for that) - it scrolls
+  // .reader-scroll to the toolbar's untransformed document position
+  // (the top, since it's ArticleReader.vue's root's first child) as a pure
+  // test-tooling artifact that never happens for a real user's click.
+  // Confirmed directly: Playwright's own .click() reset this to 0 even with
+  // no focus() call anywhere in toggleNote() at all; a raw .click() didn't.
+  const noteBtn = page.locator('footer.reader-toolbar .note-btn')
+  await noteBtn.evaluate((el) => (el as HTMLElement).click())
+  await expect(page.locator('.reader-note')).toBeVisible()
+
+  // Give any scroll animation time to actually happen before checking.
+  await page.waitForTimeout(600)
+
+  // Inserting the note editor above the current scroll position legitimately
+  // shifts scrollTop by roughly its own height (the browser's scroll
+  // anchoring keeping the same content visually in view) - that's expected,
+  // not the bug. The bug was scrollTop collapsing back toward the top.
+  const scrollAfter = await scrollEl.evaluate((el) => el.scrollTop)
+  expect(scrollAfter).toBeGreaterThan(scrollBefore - 50)
+})

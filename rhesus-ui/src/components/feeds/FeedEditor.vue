@@ -1,7 +1,12 @@
 <template>
   <div class="feed-editor">
     <div class="feed-editor-inner">
-      <h2>Feeds</h2>
+      <div class="feed-editor-header">
+        <h2>Feeds</h2>
+        <a :href="ttrssUrl" target="_blank" rel="noopener noreferrer" class="ttrss-icon-link" title="Open TT-RSS settings">
+          <ExternalLink :size="15" />
+        </a>
+      </div>
 
       <section class="opml-section">
         <h3>OPML</h3>
@@ -199,16 +204,24 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, X, Loader2, ChevronDown, ChevronRight, AlertCircle, StickyNote, Rss } from 'lucide-vue-next'
+import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, X, Loader2, ChevronDown, ChevronRight, AlertCircle, StickyNote, Rss, ExternalLink } from 'lucide-vue-next'
 import { getAllFeeds, getAllCategories, deleteFeed, editFeed, importOpml, refreshFeed, getFeedNotes, logUnsubscribeReason } from '@/api/feeds'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import FeedPreviewDialog from '@/components/feeds/FeedPreviewDialog.vue'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import { useFeedsStore } from '@/stores/feeds'
 import { useAddFeed } from '@/composables/useAddFeed'
+import { getSid } from '@/api/client'
 import type { ApiFeed, ApiCategory } from '@/types/api'
 
 const feedsStore = useFeedsStore()
+
+const ttrssUrl = computed(() => {
+  const sid = getSid()
+  return sid
+    ? `/tt-rss/plugins.local/rhesus_settings/redirect.php?sid=${sid}`
+    : '/tt-rss/prefs.php'
+})
 
 const feeds = ref<ApiFeed[]>([])
 const categories = ref<ApiCategory[]>([])
@@ -405,6 +418,32 @@ async function onImportFile(e: Event) {
 h2 {
   font-size: var(--font-size-xl);
   margin-bottom: 24px;
+}
+
+.feed-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.feed-editor-header h2 {
+  margin-bottom: 0;
+}
+
+.ttrss-icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.ttrss-icon-link:hover {
+  color: var(--color-accent);
+  background: var(--color-surface-raised);
 }
 
 section {

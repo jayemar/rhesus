@@ -103,29 +103,42 @@
         </div>
       </Transition>
     </Teleport>
-    <div v-if="showSearch" class="reader-search">
-      <input
-        ref="searchInput"
-        v-model="searchQuery"
-        class="reader-search-input"
-        placeholder="Search..."
-        @input="doSearch"
-        @keydown.enter.prevent="nextMatch"
-        @keydown.shift.enter.prevent="prevMatch"
-        @keydown.esc="closeSearch"
-        @keydown.stop
-        @click.stop
-      />
-      <span v-if="matchCount > 0" class="reader-search-count">{{ currentMatchIndex + 1 }} / {{ matchCount }}</span>
-      <span v-else-if="searchQuery" class="reader-search-count reader-search-none">No results</span>
-      <button class="tb-btn" :disabled="matchCount === 0" title="Previous match" @click.stop="prevMatch">
-        <ChevronUp :size="14" />
-      </button>
-      <button class="tb-btn" :disabled="matchCount === 0" title="Next match" @click.stop="nextMatch">
-        <ChevronDown :size="14" />
-      </button>
-      <button class="tb-btn" title="Close search" @click.stop="closeSearch"><X :size="14" /></button>
-    </div>
+    <Teleport defer to=".reader-overlay-panel">
+      <Transition name="fade">
+        <div v-if="showSearch" class="floating-search">
+          <div class="reader-search-input-wrap">
+            <input
+              ref="searchInput"
+              v-model="searchQuery"
+              class="reader-search-input"
+              placeholder="Search..."
+              @input="doSearch"
+              @keydown.enter.prevent="nextMatch"
+              @keydown.shift.enter.prevent="prevMatch"
+              @keydown.esc="closeSearch"
+              @keydown.stop
+              @click.stop
+            />
+            <button
+              v-if="searchQuery"
+              class="reader-search-clear-btn"
+              type="button"
+              title="Clear"
+              @click.stop="clearSearch"
+            ><X :size="14" /></button>
+          </div>
+          <span v-if="matchCount > 0" class="reader-search-count">{{ currentMatchIndex + 1 }} / {{ matchCount }}</span>
+          <span v-else-if="searchQuery" class="reader-search-count reader-search-none">No results</span>
+          <button class="tb-btn" :disabled="matchCount === 0" title="Previous match" @click.stop="prevMatch">
+            <ChevronUp :size="14" />
+          </button>
+          <button class="tb-btn" :disabled="matchCount === 0" title="Next match" @click.stop="nextMatch">
+            <ChevronDown :size="14" />
+          </button>
+          <button class="tb-btn" title="Close search" @click.stop="closeSearch"><X :size="14" /></button>
+        </div>
+      </Transition>
+    </Teleport>
     <div v-if="showNote" class="reader-note">
       <div class="reader-note-input-wrap">
         <textarea
@@ -705,6 +718,12 @@ function closeSearch() {
   searchQuery.value = ''
   matchCount.value = 0
   currentMatchIndex.value = 0
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  doSearch()
+  searchInput.value?.focus()
 }
 
 function clearHighlights() {
@@ -1802,21 +1821,35 @@ watch(
   z-index: 199;
 }
 
-.reader-search {
+.floating-search {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90%, 420px);
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-bottom: 12px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 6px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.reader-search-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
 }
 
 .reader-search-input {
-  flex: 1;
+  width: 100%;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  padding: 5px 8px;
+  padding: 5px 26px 5px 8px;
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   outline: none;
@@ -1825,6 +1858,24 @@ watch(
 
 .reader-search-input:focus {
   border-color: var(--color-accent);
+}
+
+.reader-search-clear-btn {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  padding: 2px;
+  border-radius: 2px;
+  transition: color var(--transition-fast);
+}
+
+.reader-search-clear-btn:hover {
+  color: var(--color-text-primary);
 }
 
 .reader-search-count {

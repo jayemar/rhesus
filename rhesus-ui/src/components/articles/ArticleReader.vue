@@ -44,7 +44,7 @@
         <MoreVertical :size="16" />
       </button>
     </footer>
-    <Teleport defer to=".reader-overlay-panel">
+    <Teleport defer to=".reader-overlay">
       <Transition name="fade">
         <div v-if="scrolled" class="floating-toolbar">
           <button
@@ -103,7 +103,7 @@
         </div>
       </Transition>
     </Teleport>
-    <Teleport defer to=".reader-overlay-panel">
+    <Teleport defer to=".reader-overlay">
       <Transition name="fade">
         <div v-if="showSearch" class="floating-search">
           <div class="reader-search-input-wrap">
@@ -139,37 +139,58 @@
         </div>
       </Transition>
     </Teleport>
-    <div v-if="showNote" class="reader-note">
-      <div class="reader-note-input-wrap">
-        <textarea
-          ref="noteInput"
-          v-model="noteText"
-          class="reader-note-input"
-          placeholder="Add a note..."
-          @keydown.stop
-          @click.stop
-        />
-        <button
-          v-if="noteText"
-          class="reader-note-clear-btn"
-          type="button"
-          title="Clear"
-          @click.stop="noteText = ''"
-        ><X :size="14" /></button>
-      </div>
-      <div class="reader-note-actions">
-        <button class="reader-note-save" :disabled="noteSaving" @click.stop="saveNote">Save</button>
-        <button class="reader-note-cancel" @click.stop="cancelNote">Cancel</button>
-      </div>
+    <Teleport defer to=".reader-overlay">
+      <Transition name="fade">
+        <div v-if="showNote" class="floating-note">
+          <div class="reader-note-input-wrap">
+            <textarea
+              ref="noteInput"
+              v-model="noteText"
+              class="reader-note-input"
+              placeholder="Add a note..."
+              @keydown.stop
+              @click.stop
+            />
+            <button
+              v-if="noteText"
+              class="reader-note-clear-btn"
+              type="button"
+              title="Clear"
+              @click.stop="noteText = ''"
+            ><X :size="14" /></button>
+          </div>
+          <div class="reader-note-actions">
+            <button class="reader-note-save" :disabled="noteSaving" @click.stop="saveNote">Save</button>
+            <button class="reader-note-cancel" @click.stop="cancelNote">Cancel</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+    <img
+      v-if="heroUrl && !heroImageFailed"
+      class="reader-hero"
+      :style="heroCaption ? {} : { marginBottom: '20px' }"
+      :src="heroUrl"
+      :alt="heroAlt"
+      decoding="async"
+      @click="openLightbox(heroUrl!, heroAlt)"
+      @error="heroImageFailed = true"
+    />
+    <div v-else-if="heroUrl" class="reader-hero-broken">
+      <ImageOff :size="18" class="reader-hero-broken-icon" />
+      <span>{{ heroAlt || 'Image unavailable' }}</span>
     </div>
-    <img v-if="heroUrl" class="reader-hero" :style="heroCaption ? {} : { marginBottom: '20px' }" :src="heroUrl" :alt="heroAlt" @click="openLightbox(heroUrl!, heroAlt)" />
     <p v-if="heroCaption" class="reader-hero-caption">{{ heroCaption }}</p>
-    <div v-if="!article.content" class="reader-loading">Loading article...</div>
+    <div v-if="fetchingFull" class="reader-loading">Loading article...</div>
+    <div v-else-if="!article.content && fullContent === null" class="reader-loading reader-loading--empty">
+      <p>No content available for this article.</p>
+      <button class="reader-loading-retry" @click="toggleFullContent">Try fetching full article</button>
+    </div>
     <div v-else ref="contentEl" class="reader-content" v-html="readerContent" @click="onContentClick" />
     <div v-if="article.content" class="reader-end">* * *</div>
     <div v-if="imageAttachments.length" class="reader-attachments">
       <figure v-for="att in imageAttachments" :key="att.id" class="reader-attachment">
-        <img :src="att.content_url" :alt="att.title" @click="openLightbox(att.content_url, att.title)" />
+        <img :src="att.content_url" :alt="att.title" loading="lazy" decoding="async" @click="openLightbox(att.content_url, att.title)" />
         <figcaption v-if="att.title">{{ att.title }}</figcaption>
       </figure>
     </div>
@@ -264,6 +285,24 @@
           Tags ({{ nonEmptyTags.length }})
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
+        <button
+          class="share-option"
+          :disabled="!settingsStore.snoozeAvailable"
+          :title="settingsStore.snoozeAvailable ? '' : 'Snooze plugin not installed'"
+          @click="openMoreSnoozeDropdown"
+        >
+          Snooze
+          <ChevronRight :size="13" class="share-option-chevron" />
+        </button>
+        <button
+          class="share-option"
+          :disabled="!settingsStore.selfDestructAvailable"
+          :title="settingsStore.selfDestructAvailable ? '' : 'Self-destruct plugin not installed'"
+          @click="openMoreSelfDestructDropdown"
+        >
+          Self-destruct
+          <ChevronRight :size="13" class="share-option-chevron" />
+        </button>
         <button class="share-option" @click="openFeedEditDialog">Edit feed</button>
         <button class="share-option" :disabled="refetching" @click="refetchCurrentArticle">
           {{ refetching ? 'Refetching...' : 'Refetch article' }}
@@ -313,6 +352,54 @@
           </div>
         </template>
       </div>
+      <div v-if="snoozeOpen" class="font-backdrop" @click="snoozeOpen = false" />
+      <div v-if="snoozeOpen" class="font-dropdown tags-popup" :style="snoozeDropdownStyle" @click.stop>
+        <div class="tags-popup-heading">Snooze until</div>
+        <button
+          v-for="preset in snoozePresets"
+          :key="preset.label"
+          class="font-option"
+          :disabled="snoozing"
+          @click="confirmSnooze(preset.until())"
+        >{{ preset.label }}<span v-if="presetHint(preset)" class="snooze-preset-hint"> ({{ presetHint(preset) }})</span></button>
+        <div class="tag-filter-footer snooze-custom-row">
+          <input
+            v-model="snoozeCustomValue"
+            type="datetime-local"
+            class="snooze-datetime-input"
+            :disabled="snoozing"
+          />
+          <button
+            class="tag-filter-create-btn"
+            :disabled="snoozing || !snoozeCustomValue"
+            @click="confirmCustomSnooze"
+          >{{ snoozing ? 'Snoozing...' : 'Snooze' }}</button>
+        </div>
+      </div>
+      <div v-if="selfDestructOpen" class="font-backdrop" @click="selfDestructOpen = false" />
+      <div v-if="selfDestructOpen" class="font-dropdown tags-popup" :style="selfDestructDropdownStyle" @click.stop>
+        <div class="tags-popup-heading">Self-destruct in</div>
+        <button
+          v-for="preset in selfDestructPresets"
+          :key="preset.label"
+          class="font-option"
+          :disabled="selfDestructing"
+          @click="confirmSelfDestruct(preset.until())"
+        >{{ preset.label }}</button>
+        <div class="tag-filter-footer snooze-custom-row">
+          <input
+            v-model="selfDestructCustomValue"
+            type="datetime-local"
+            class="snooze-datetime-input"
+            :disabled="selfDestructing"
+          />
+          <button
+            class="tag-filter-create-btn"
+            :disabled="selfDestructing || !selfDestructCustomValue"
+            @click="confirmCustomSelfDestruct"
+          >{{ selfDestructing ? 'Queuing...' : 'Queue' }}</button>
+        </div>
+      </div>
       <div v-if="moreFontOpen" class="font-backdrop" @click="moreFontOpen = false" />
       <div v-if="moreFontOpen" class="font-dropdown" :style="moreFontDropdownStyle" @click.stop>
         <button
@@ -338,16 +425,18 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { Readability } from '@mozilla/readability'
-import { Mail, MailOpen, Star, Tag as TagIcon, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag as TagIcon, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight, ImageOff } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
 import { useSettingsStore } from '@/stores/settings'
 import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent, refetchArticle } from '@/api/articles'
+import { snoozeArticle } from '@/api/snooze'
+import { selfDestructArticle } from '@/api/selfDestruct'
 import { editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
 import { extractJsonLdMeta } from '@/utils/jsonld'
-import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes } from '@/utils/text'
+import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities } from '@/utils/text'
 import { anchorPopupStyle } from '@/utils/popup'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
@@ -359,6 +448,7 @@ const emit = defineEmits<{
   'scroll-to-top': []
   'create-filter-from-tags': [tags: string[]]
   'full-content-meta': [meta: { author?: string, publishedAt?: number }]
+  'edit-feed': [feedId: number]
 }>()
 const articlesStore = useArticlesStore()
 const feedsStore = useFeedsStore()
@@ -460,6 +550,137 @@ function toggleTagSelection(tag: string) {
   if (next.has(tag)) next.delete(tag)
   else next.add(tag)
   selectedTags.value = next
+}
+
+const snoozeOpen = ref(false)
+const snoozeDropdownStyle = ref<Record<string, string>>({})
+const snoozeCustomValue = ref('')
+const snoozing = ref(false)
+
+// Quick presets, computed fresh each time the menu opens (not reactive
+// refs) so "Later today" etc. always reflect the current moment rather
+// than when the component first mounted.
+const snoozePresets = [
+  { label: 'Later today (+4h)', until: () => { const d = new Date(); d.setHours(d.getHours() + 4); return d } },
+  { label: 'This evening', until: () => {
+      const d = new Date()
+      d.setHours(18, 0, 0, 0)
+      if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1)
+      return d
+    } },
+  { label: 'Tomorrow morning', until: () => {
+      const d = new Date()
+      d.setDate(d.getDate() + 1)
+      d.setHours(6, 0, 0, 0)
+      return d
+    } },
+  { label: 'Next week', until: () => { const d = new Date(); d.setDate(d.getDate() + 7); return d } },
+  { label: 'Next month', until: () => { const d = new Date(); d.setMonth(d.getMonth() + 1); return d } },
+]
+
+function formatCompactTime(date: Date): string {
+  let h = date.getHours()
+  const m = date.getMinutes()
+  const period = h >= 12 ? 'pm' : 'am'
+  h = h % 12
+  if (h === 0) h = 12
+  return m === 0 ? `${h}${period}` : `${h}:${String(m).padStart(2, '0')}${period}`
+}
+
+// "Later today (+4h)" already spells out its own offset in the label, so it
+// gets no extra hint. The rest get a short parenthetical: just a time for
+// anything today/tomorrow (the label already says which), a short date
+// otherwise - kept terse since the dropdown can't scroll horizontally.
+function presetHint(preset: { label: string; until: () => Date }): string {
+  if (preset.label.includes('(')) return ''
+  const date = preset.until()
+  const now = new Date()
+  const dayDiff = Math.round(
+    (new Date(date.toDateString()).getTime() - new Date(now.toDateString()).getTime()) / 86400000
+  )
+  if (dayDiff <= 1) return formatCompactTime(date)
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+function openMoreSnoozeDropdown() {
+  showMoreMenu.value = false
+  if (moreBtn.value) {
+    snoozeDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 240)
+  }
+  snoozeCustomValue.value = ''
+  snoozeOpen.value = true
+}
+
+async function confirmSnooze(until: Date) {
+  if (snoozing.value) return
+  snoozing.value = true
+  try {
+    await snoozeArticle(props.article.id, until)
+    articlesStore.markRead(props.article.id, true)
+    snoozeOpen.value = false
+    emit('copied', `Snoozed until ${until.toLocaleString()}`)
+  } catch (e) {
+    console.error('snoozeArticle failed:', e)
+    emit('copied', 'Snooze failed - see console for details')
+  } finally {
+    snoozing.value = false
+  }
+}
+
+function confirmCustomSnooze() {
+  if (!snoozeCustomValue.value) return
+  const until = new Date(snoozeCustomValue.value)
+  if (isNaN(until.getTime())) {
+    emit('copied', 'Invalid date/time')
+    return
+  }
+  void confirmSnooze(until)
+}
+
+const selfDestructOpen = ref(false)
+const selfDestructDropdownStyle = ref<Record<string, string>>({})
+const selfDestructCustomValue = ref('')
+const selfDestructing = ref(false)
+
+const selfDestructPresets = [
+  { label: 'In 1 week', until: () => { const d = new Date(); d.setDate(d.getDate() + 7); return d } },
+  { label: 'In 1 month', until: () => { const d = new Date(); d.setMonth(d.getMonth() + 1); return d } },
+  { label: 'In 3 months', until: () => { const d = new Date(); d.setMonth(d.getMonth() + 3); return d } },
+  { label: 'In 1 year', until: () => { const d = new Date(); d.setFullYear(d.getFullYear() + 1); return d } },
+]
+
+function openMoreSelfDestructDropdown() {
+  showMoreMenu.value = false
+  if (moreBtn.value) {
+    selfDestructDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 240)
+  }
+  selfDestructCustomValue.value = ''
+  selfDestructOpen.value = true
+}
+
+async function confirmSelfDestruct(until: Date) {
+  if (selfDestructing.value) return
+  selfDestructing.value = true
+  try {
+    await selfDestructArticle(props.article.id, until)
+    selfDestructOpen.value = false
+    emit('copied', `Self-destructs ${until.toLocaleString()}`)
+  } catch (e) {
+    console.error('selfDestructArticle failed:', e)
+    emit('copied', 'Self-destruct failed - see console for details')
+  } finally {
+    selfDestructing.value = false
+  }
+}
+
+function confirmCustomSelfDestruct() {
+  if (!selfDestructCustomValue.value) return
+  const until = new Date(selfDestructCustomValue.value)
+  if (isNaN(until.getTime())) {
+    emit('copied', 'Invalid date/time')
+    return
+  }
+  void confirmSelfDestruct(until)
 }
 
 const showFeedEditDialog = ref(false)
@@ -643,6 +864,37 @@ function onContentClick(e: MouseEvent) {
   const a = (e.target as HTMLElement).closest('a')
   if (a?.href) {
     e.preventDefault()
+    const url = new URL(a.href, window.location.href)
+    // Same origin isn't enough on its own - /tt-rss/prefs.php is proxied
+    // through this same origin (see nginx.conf) but is a genuinely
+    // different app/page, not a Rhesus route. Only a matching pathname
+    // means it's actually this same SPA instance with just a different
+    // hash; treating /tt-rss/... as "internal" set window.location.hash to
+    // empty (that URL has no "#" at all), which cleared Rhesus's own route
+    // and closed whatever was open instead of navigating to TT-RSS.
+    if (url.origin === window.location.origin && url.pathname === window.location.pathname) {
+      // The query string for a hash-routed URL lives inside the hash
+      // fragment itself (e.g. "#/feed/698?editFeed=698"), not in url.search.
+      const hashQuery = url.hash.split('?')[1]
+      const editFeedId = hashQuery ? Number(new URLSearchParams(hashQuery).get('editFeed')) : NaN
+      if (editFeedId > 0) {
+        // A deep link back to a specific feed's edit dialog (e.g. from the
+        // feed health report) - open it directly without navigating away
+        // from whatever's currently showing (e.g. the article list behind
+        // this reader). Changing the route here would switch that
+        // underlying list to the clicked feed too, which is a bigger,
+        // unwanted side effect of what's meant to be "just open a dialog."
+        emit('edit-feed', editFeedId)
+        return
+      }
+      // Any other same-page link is genuine internal navigation - stay
+      // in this tab instead of forcing a new one open. Rhesus uses
+      // hash-based routing, so just updating the hash is enough for Vue
+      // Router to pick up and re-route, with no full page reload
+      // (confirmed directly via Playwright).
+      window.location.hash = url.hash
+      return
+    }
     window.open(a.href, '_blank', 'noopener,noreferrer')
   }
 }
@@ -660,9 +912,18 @@ watch(() => props.article.id, () => {
 
 function toggleNote() {
   if (!showNote.value) {
+    closeSearch()
     noteText.value = currentNote.value
     showNote.value = true
-    nextTick(() => noteInput.value?.focus())
+    nextTick(() => {
+      // preventScroll stops the browser's default scroll-into-view for the
+      // newly-focused textarea - the note editor floats above the content
+      // (teleported to .reader-overlay-panel, like the search bar) rather
+      // than being inserted inline, so there's no layout shift to scroll
+      // into view in the first place, but this still guards against the
+      // browser's own focus-scroll behavior on unrelated ancestors.
+      noteInput.value?.focus({ preventScroll: true })
+    })
   } else {
     showNote.value = false
   }
@@ -706,6 +967,7 @@ let highlights: HTMLElement[] = []
 function toggleSearch() {
   showSearch.value = !showSearch.value
   if (showSearch.value) {
+    showNote.value = false
     nextTick(() => searchInput.value?.focus())
   } else {
     closeSearch()
@@ -815,6 +1077,7 @@ watch(() => props.article.id, () => {
   if (showSearch.value && searchQuery.value) {
     nextTick(() => doSearch())
   }
+  autoFetchIfEmpty()
 })
 
 const showShareMenu = ref(false)
@@ -827,6 +1090,25 @@ const morePopupStyle = ref<Record<string, string>>({})
 
 const fullContent = ref<string | null>(null)
 const fetchingFull = ref(false)
+
+// Articles saved via rhesus-share (and anything else that creates an entry
+// with no body) have permanently empty article.content - nothing ever
+// populates it on its own. Trigger the same live fetch the "newspaper"
+// button does automatically in that case, rather than leaving the reader
+// stuck on "Loading article..." until the user discovers the manual button.
+//
+// Called directly here (setup runs synchronously before the first render)
+// rather than from onMounted, so if a fetch is needed, fetchingFull is
+// already true - a real fetch genuinely in flight - by the time the
+// component first paints, instead of onMounted firing a tick later and
+// briefly showing the wrong ("no content") message first.
+function autoFetchIfEmpty() {
+  if (!props.article.content && fullContent.value === null && !fetchingFull.value) {
+    void toggleFullContent()
+  }
+}
+
+autoFetchIfEmpty()
 
 const showLabelMenu = ref(false)
 const labelBtn = ref<HTMLElement | null>(null)
@@ -862,6 +1144,16 @@ async function openLabelMenu(event: MouseEvent) {
     loadingLabels.value = false
   }
 }
+
+// Lets AppShell's mobile-back-button handling close just the label popup
+// (rather than the whole article) when it's open - see AppShell.vue's
+// onPopState(). The popup itself never touches history directly; AppShell
+// re-pushes the article's own history entry after calling this, so the
+// back press is "absorbed" by the popup instead of leaving the article.
+defineExpose({
+  isLabelMenuOpen: computed(() => showLabelMenu.value),
+  closeLabelMenuForBackButton: () => { showLabelMenu.value = false },
+})
 
 function syncLabelsToStore() {
   articlesStore.setLabels(
@@ -1035,6 +1327,21 @@ async function toggleFullContent() {
       captionSibling.remove()
     })
 
+    // Readability's div-conditional-cleaning pass scores every <div> in the
+    // document by its own class/id weight and link density, with no
+    // awareness of a wrapping <blockquote> - a pull-quote whose CMS puts the
+    // styling class on the <blockquote> itself (NPR does this) rather than
+    // the inner <div> gets zero weight credit, so a short, link-heavy quote
+    // (e.g. "...Listen to the full episode here") trips Readability's "low
+    // weight and a little linky" rule and the whole <div> - text and all -
+    // gets deleted, leaving an empty blockquote box. Unwrapping a <div>
+    // that's the sole child of a <blockquote> first removes the div
+    // Readability would flag, without touching the blockquote's actual text.
+    doc.querySelectorAll('blockquote > div:only-child').forEach(div => {
+      while (div.firstChild) div.parentNode?.insertBefore(div.firstChild, div)
+      div.remove()
+    })
+
     const article = new Readability(doc).parse()
     fullContent.value = article?.content ?? result.content
     if (meta.author || meta.publishedAt) emit('full-content-meta', meta)
@@ -1078,11 +1385,45 @@ async function copy(type: 'title' | 'link' | 'markdown') {
 // commas (e.g. Cloudinary transformation URLs like w_700,h_700,c_fit/...).
 // The lookahead requires whitespace then a non-whitespace char after the comma, which
 // matches real entry boundaries but not internal commas (no whitespace follows them).
-function firstSrcsetUrl(srcset: string): string | null {
+// A srcset lists its candidates smallest-first by convention, so taking the
+// first one picks the lowest-resolution variant on offer. NPR's hero srcset
+// starts at 400w; stretched across the full reader width on a high-DPR phone
+// that is visibly blurry. Pick by size instead of by position.
+//
+// Not simply the largest available either: that srcset goes up to 2400w, whose
+// decoded bitmap is roughly 13MB, and the hero is one of the few images that
+// is never lazy-loaded (it is above the fold). Choose the smallest candidate
+// that still covers the display width, which is sharp without being wasteful.
+//
+// Content images keep their srcset through sanitization and are resolved by
+// the browser natively; this only matters for the hero, which is extracted out
+// to a single src.
+function bestSrcsetUrl(srcset: string): string | null {
   if (!srcset) return null
-  const first = srcset.split(/,(?=\s+\S)/)[0]?.trim()
-  if (!first) return null
-  return first.replace(/\s+\d+(\.\d+)?[wx]$/, '').trim() || null
+  const dpr = window.devicePixelRatio || 1
+  // Cap the target so an unusually wide window doesn't reach for a huge asset.
+  const target = Math.min(window.innerWidth * dpr, 2048)
+
+  const candidates = srcset
+    .split(/,(?=\s+\S)/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const m = part.match(/^(.*?)\s+(\d+(?:\.\d+)?)([wx])$/)
+      if (!m) return { url: part, width: 0 }
+      const value = parseFloat(m[2]!)
+      // Put w- and x-descriptors on one scale so they can be compared.
+      return { url: m[1]!.trim(), width: m[3] === 'x' ? value * window.innerWidth : value }
+    })
+    .filter((c) => c.url)
+
+  if (!candidates.length) return null
+  // No descriptors at all (a bare single-URL srcset): nothing to choose by.
+  if (candidates.every((c) => c.width === 0)) return candidates[0]!.url
+
+  const sized = candidates.filter((c) => c.width > 0).sort((a, b) => a.width - b.width)
+  const covering = sized.find((c) => c.width >= target)
+  return (covering ?? sized[sized.length - 1]!).url
 }
 
 // Strip HTML tags from a string to get plain text.
@@ -1153,7 +1494,7 @@ function parseHero(content: string): { src: string | null; alt: string; caption:
       const source = picture.querySelector('source[data-srcset], source[srcset]')
       if (source) {
         const raw = source.getAttribute('data-srcset') ?? source.getAttribute('srcset') ?? ''
-        src = firstSrcsetUrl(raw)
+        src = bestSrcsetUrl(raw)
       }
     }
 
@@ -1199,6 +1540,9 @@ const heroUrl = computed(() => {
 })
 
 const heroAlt = computed(() => parsedHero.value?.alt ?? '')
+
+const heroImageFailed = ref(false)
+watch(heroUrl, () => { heroImageFailed.value = false })
 
 const heroCaption = computed(() => {
   if (!heroUrl.value) return ''
@@ -1268,7 +1612,15 @@ function fallbackEmptyEmbeds(doc: Document) {
   doc.querySelectorAll(selector).forEach((el) => {
     // Some platforms (Twitter's static fallback markup, most TikTok embeds)
     // already include real, readable text - leave those alone entirely.
-    if (el.textContent?.trim()) return
+    // Instagram is the one exception: whenever data-instgrm-captioned is
+    // set, its skeleton-loader placeholder bakes in text too ("View this
+    // post on Instagram" / "A post shared by X") - but that's always
+    // generic boilerplate, never the post's actual caption or content, so
+    // it's never worth keeping over the small fallback link below. Left
+    // as-is, it renders as a large, mostly-empty box sized to match the
+    // real embed that never loads.
+    const isInstagram = el.matches('blockquote.instagram-media')
+    if (!isInstagram && el.textContent?.trim()) return
     const url =
       el.getAttribute('data-instgrm-permalink') ||
       el.getAttribute('cite') ||
@@ -1314,6 +1666,10 @@ function processContent(html: string): string {
     if (src === 'undefined' || src === '' || src === 'null' || /\/tracking[/.]|[-_]pixel\./i.test(src))
       el.remove()
   })
+  // Repair entities the feed escaped one level too many (see text.ts). Done
+  // on the parsed tree so attribute values, where a bare &amp; is legitimate,
+  // are left alone.
+  decodeResidualEntities(pre.body)
   resolveRelativeUrls(pre, props.article.link ?? undefined)
   fallbackEmptyEmbeds(pre)
   pre.querySelectorAll('img[data-caption]').forEach(img => {
@@ -1342,7 +1698,58 @@ function processContent(html: string): string {
   // non-dangerous HTML, so they survive sanitization and render as inert
   // icon clutter unless removed here.
   doc.querySelectorAll('button').forEach(el => el.remove())
+  // A blockquote can end up with no real content for reasons outside our
+  // control (Readability stripping a div-wrapped quote it judged "shady",
+  // a malformed feed, etc.) - the CSS below still borders/backgrounds it
+  // regardless, so leaving it in place renders as a visibly broken,
+  // decorated box with nothing inside. Drop it outright instead. A
+  // blockquote embedding only media (no text) is left alone - that's not
+  // "empty" in the sense that matters here.
+  doc.querySelectorAll('blockquote').forEach(bq => {
+    const hasText = !!bq.textContent?.trim()
+    const hasMedia = !!bq.querySelector('img, video, iframe, svg')
+    if (!hasText && !hasMedia) bq.remove()
+  })
+  // Some sites wrap a pull quote in an outer <blockquote> used purely as a
+  // styling frame, with the actual quote in a nested <blockquote> inside it.
+  // Hearst's pattern is:
+  //   <blockquote data-theme-key="pullquote">
+  //     <span aria-hidden="true"></span>          (empty, decorative)
+  //     <blockquote>the actual quote</blockquote>
+  //     <span aria-hidden="true"></span>
+  //   </blockquote>
+  // Their CSS turns the outer into a pull-quote frame; here both are just
+  // <blockquote>, so the reader draws two sets of indent and border, one
+  // inside the other. Collapse the outer when it contributes nothing of its
+  // own. A genuine quote-within-a-quote has its own text or media alongside
+  // the nested one, and is left alone.
+  doc.querySelectorAll('blockquote > blockquote').forEach(inner => {
+    const outer = inner.parentElement
+    if (!outer || outer.querySelectorAll('blockquote').length !== 1) return
+    const ownNodes = Array.from(outer.childNodes).filter(n => n !== inner)
+    if (ownNodes.some(n => (n.textContent ?? '').trim())) return
+    // matches() as well as querySelector(): the media may *be* the sibling
+    // node rather than sit inside it.
+    const MEDIA = 'img, video, iframe, svg'
+    if (ownNodes.some(n => n instanceof Element && (n.matches(MEDIA) || n.querySelector(MEDIA)))) return
+    // Carry the outer's classes over so the pull-quote marker set above (and
+    // any site class markPullQuotes matches on) survives the unwrap.
+    outer.classList.forEach(c => inner.classList.add(c))
+    outer.replaceWith(inner)
+  })
   markPullQuotes(doc)
+  // Defer decoding of article images until they approach the viewport. Without
+  // this the browser decodes every image in the article at once, at full
+  // natural resolution regardless of the max-width: 100% it is displayed at -
+  // a long full-fetched article can hold hundreds of MB of decoded bitmaps.
+  // On a memory-pressured device that starves the graphics caches, and the
+  // first thing to fall over is the glyph atlas: shapes still paint while text
+  // vanishes (see READER-KEYBOARD-VIEWPORT-FLASH.md). Applied after
+  // DOMPurify.sanitize() above, which would otherwise strip these attributes.
+  doc.querySelectorAll('img').forEach(img => {
+    img.setAttribute('loading', 'lazy')
+    img.setAttribute('decoding', 'async')
+  })
   doc.querySelectorAll('table').forEach(table => {
     const wrapper = doc.createElement('div')
     wrapper.className = 'table-scroll'
@@ -1425,6 +1832,25 @@ watch(
   font-size: var(--font-size-sm);
 }
 
+.reader-loading--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.reader-loading-retry {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.reader-loading-retry:hover {
+  background: var(--color-surface);
+}
+
 .reader-hero {
   width: calc(100% + 2 * var(--reader-h-pad, 24px));
   margin-left: calc(-1 * var(--reader-h-pad, 24px));
@@ -1434,6 +1860,24 @@ watch(
   margin-bottom: 8px;
   display: block;
   cursor: zoom-in;
+}
+
+.reader-hero-broken {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
+.reader-hero-broken-icon {
+  flex-shrink: 0;
 }
 
 .reader-hero-caption {
@@ -1833,7 +2277,10 @@ watch(
   position: absolute;
   top: 16px;
   left: 50%;
-  transform: translateX(-50%);
+  /* Same reasoning as .floating-note below - the search field is focused and
+     carries a blinking caret over the same scrollable article content. */
+  transform: translateX(-50%) translateZ(0);
+  contain: layout paint;
   width: min(90%, 420px);
   z-index: 5;
   display: flex;
@@ -1897,10 +2344,27 @@ watch(
   color: var(--color-danger);
 }
 
-.reader-note {
-  padding-bottom: 12px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid var(--color-border);
+.floating-note {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  /* translateZ(0) promotes this to its own compositor layer, and contain
+     confines layout/paint work to it. The focused textarea has a caret that
+     repaints twice a second for as long as the editor is open; without these,
+     each blink invalidates a region of .reader-overlay-panel that overlaps
+     .reader-scroll, forcing the whole article - images included - to be
+     re-rasterized 2x/second. That is the only continuous repaint source that
+     exists exclusively while the note editor is open, which matches the
+     symptom being note-editor-specific rather than general memory pressure. */
+  transform: translateX(-50%) translateZ(0);
+  contain: layout paint;
+  width: min(90%, 420px);
+  z-index: 5;
+  padding: 10px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
 .reader-note-input-wrap {
@@ -2128,6 +2592,26 @@ watch(
 .tag-filter-create-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.snooze-preset-hint {
+  color: var(--color-text-muted);
+}
+
+.snooze-custom-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snooze-datetime-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
 }
 
 .floating-toolbar {

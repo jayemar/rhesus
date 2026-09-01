@@ -45,6 +45,12 @@
       <button class="more-menu-option" @click="showMoreMenu = false; showAddFeedDialog = true">
         <Rss :size="14" /> Add feed
       </button>
+      <button class="more-menu-option" @click="showMoreMenu = false; showSnoozedPanel = true">
+        <AlarmClock :size="14" /> Snoozed
+      </button>
+      <button class="more-menu-option" @click="showMoreMenu = false; showSelfDestructPanel = true">
+        <Flame :size="14" /> Self-destruct
+      </button>
     </div>
 
     <AddFeedDialog v-if="showAddFeedDialog" @close="showAddFeedDialog = false" />
@@ -126,6 +132,30 @@
           <FilterManager :initial-filter="filterManagerInitialFilter" />
         </div>
       </Transition>
+      <Transition name="overlay">
+        <div
+          v-if="showSnoozedPanel"
+          class="settings-overlay"
+          tabindex="-1"
+          @vue:mounted="focusOverlay"
+          @keydown.esc="showSnoozedPanel = false"
+        >
+          <button class="settings-close" title="Close" @click="showSnoozedPanel = false"><X :size="14" /></button>
+          <SnoozedArticlesPanel @copied="showCopyToast" />
+        </div>
+      </Transition>
+      <Transition name="overlay">
+        <div
+          v-if="showSelfDestructPanel"
+          class="settings-overlay"
+          tabindex="-1"
+          @vue:mounted="focusOverlay"
+          @keydown.esc="showSelfDestructPanel = false"
+        >
+          <button class="settings-close" title="Close" @click="showSelfDestructPanel = false"><X :size="14" /></button>
+          <SelfDestructPanel @copied="showCopyToast" />
+        </div>
+      </Transition>
 
       <Transition name="overlay">
         <div v-if="selectedArticle" ref="readerOverlayEl" class="reader-overlay" @keydown.esc="closeReader">
@@ -160,6 +190,16 @@
       </Transition>
     </main>
 
+    <!-- Deep-linked feed edit (e.g. ?editFeed=<id> from the health report) -
+         standalone, doesn't require Feed Management to be open -->
+    <FeedEditDialog
+      v-if="deepLinkEditFeedId"
+      :feed-id="deepLinkEditFeedId"
+      @close="closeDeepLinkEditFeed"
+      @saved="feedsStore.loadTree()"
+      @unsubscribed="closeDeepLinkEditFeed"
+    />
+
     <!-- Copy toast -->
     <Transition name="toast">
       <div v-if="copyToast" class="copy-toast">{{ copyToast }}</div>
@@ -186,7 +226,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { VNode } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter, MoreVertical } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter, MoreVertical, AlarmClock, Flame } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
@@ -195,10 +235,13 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import FeedTree from '@/components/feeds/FeedTree.vue'
 import FeedEditor from '@/components/feeds/FeedEditor.vue'
+import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import FilterManager from '@/components/filters/FilterManager.vue'
 import AddFeedDialog from '@/components/feeds/AddFeedDialog.vue'
 import ArticleList from '@/components/articles/ArticleList.vue'
 import ArticleReader from '@/components/articles/ArticleReader.vue'
+import SnoozedArticlesPanel from '@/components/articles/SnoozedArticlesPanel.vue'
+import SelfDestructPanel from '@/components/articles/SelfDestructPanel.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { browserShowsNativeToast } from '@/utils/clipboard'
@@ -219,68 +262,11 @@ const { settings, loaded: settingsLoaded } = storeToRefs(settingsStore)
 const { articles, selectedId } = storeToRefs(articlesStore)
 const { selection, tree } = storeToRefs(feedsStore)
 
-function findInTree(items: typeof tree.value, bareId: number): (typeof tree.value)[0] | undefined {
-  for (const item of items) {
-    if (item.bare_id === bareId) return item
-    if (item.items) {
-      const found = findInTree(item.items, bareId)
-      if (found) return found
-    }
-  }
-  return undefined
-}
-
-const baseServerUnread = ref(0)
-
-// readCountDelta exists purely to reflect mark-read actions instantly, ahead
-// of the next tree refresh. Once a fresh tree fetch gives us a real server
-// count for the selected feed, that count already reflects every read that's
-// been synced so far - so the delta's job is done and it must be reset here.
-// Without this, a stale delta from e.g. marking a big batch read (pull-to-
-// refresh's mark-all-then-fetch-new) keeps subtracting from the NEXT fresh
-// count too, which can drive it to 0 and hide the badge even when genuinely
-// new unread articles just arrived.
-watchEffect(() => {
-  const sel = selection.value
-  if (!sel) { baseServerUnread.value = 0; return }
-  // Starred is a total-count feed (see feedsStore.starredCount), not an
-  // unread-count one like every other feed, so this can't come from the
-  // regular counters lookup below.
-  if (sel.id === -1 && !sel.isCategory) {
-    baseServerUnread.value = feedsStore.starredCount
-    return
-  }
-  // getFeedTree's own "unread" field is a real number only for the
-  // hardcoded virtual feeds under "Special" - for every ordinary feed or
-  // user category it's a bogus -1 sentinel (confirmed directly against a
-  // live server response), which silently hid the header badge for any
-  // regular feed/category selection. feedCounters/categoryCounters (from
-  // the dedicated getCounters() call - see api/feeds.ts) carry the real
-  // numbers TT-RSS's own web client cross-references instead. Feed and
-  // category ids share the same positive-integer namespace, so which map
-  // to check depends on sel.isCategory.
-  const real = sel.isCategory ? feedsStore.categoryCounters[sel.id] : feedsStore.feedCounters[sel.id]
-  if (real !== undefined) {
-    baseServerUnread.value = real
-    articlesStore.readCountDelta = 0
-    return
-  }
-  // Fallback for anything getCounters() hasn't caught up with yet (e.g. a
-  // feed subscribed moments ago, before the next counters refresh).
-  const node = findInTree(tree.value, sel.id)
-  if (node && node.unread >= 0) {
-    baseServerUnread.value = node.unread
-    articlesStore.readCountDelta = 0
-  }
-})
-
-const unreadCount = computed(() => {
-  const sel = selection.value
-  if (sel?.id === -1 && !sel.isCategory) {
-    return Math.max(0, baseServerUnread.value + articlesStore.starredCountDelta)
-  }
-  return Math.max(0, baseServerUnread.value - articlesStore.readCountDelta)
-})
+// The header shows feedsStore.selectedUnreadCount directly - see that
+// store's doc comment for why this now lives there instead of being
+// computed locally (it's shared with the sidebar row for the same
+// selection, so there's only one place this logic can drift from itself).
+const unreadCount = computed(() => feedsStore.selectedUnreadCount)
 
 const authStore = useAuthStore()
 
@@ -292,6 +278,8 @@ const showFilterManager = ref(false)
 const showMoreMenu = ref(false)
 const moreMenuStyle = ref<Record<string, string>>({})
 const showAddFeedDialog = ref(false)
+const showSnoozedPanel = ref(false)
+const showSelfDestructPanel = ref(false)
 const filterManagerInitialFilter = ref<Partial<ApiFilter> | null>(null)
 const showArticleSearch = ref(false)
 const copyToast = ref<string | null>(null)
@@ -396,6 +384,8 @@ async function toggleFullscreen() {
 
 onMounted(() => {
   settingsStore.load()
+  settingsStore.checkSnoozeAvailable()
+  settingsStore.checkSelfDestructAvailable()
   window.addEventListener('popstate', onPopState)
   document.addEventListener('fullscreenchange', onFullscreenChange)
 })
@@ -451,6 +441,33 @@ watch(
   { immediate: true },
 )
 
+// Lets an external link (e.g. the af_feed_advisor health report) deep-link
+// straight into editing a specific feed via ?editFeed=<id> on any route.
+// Rendered as its own standalone dialog (see deepLinkEditFeedId below)
+// rather than routing through showFeedEditor/FeedEditor.vue - opening the
+// entire Feed Management panel first just to show a dialog on top of it
+// was an unnecessary, jarring detour from whatever the user was actually
+// looking at (e.g. reading the health report article itself).
+const deepLinkEditFeedId = ref<number | null>(null)
+
+watch(
+  () => route.query.editFeed,
+  (editFeed) => {
+    const id = Number(editFeed)
+    if (id > 0) deepLinkEditFeedId.value = id
+  },
+  { immediate: true },
+)
+
+function closeDeepLinkEditFeed() {
+  deepLinkEditFeedId.value = null
+  if (route.query.editFeed) {
+    const query = { ...route.query }
+    delete query.editFeed
+    router.replace({ query })
+  }
+}
+
 // On startup with no feed in URL, auto-navigate to All Articles with sidebar open.
 let startupDone = false
 watch(
@@ -466,8 +483,8 @@ watch(
 
 // Lock document scroll while an overlay panel is open so the article list
 // behind it cannot scroll through touch inertia or mis-fires.
-watch([showSettings, showFeedEditor, showFilterManager, sidebarCollapsed], ([s, f, fm, collapsed]) => {
-  document.body.style.overflow = (s || f || fm || !collapsed) ? 'hidden' : ''
+watch([showSettings, showFeedEditor, showFilterManager, showSnoozedPanel, showSelfDestructPanel, sidebarCollapsed], ([s, f, fm, sn, sd, collapsed]) => {
+  document.body.style.overflow = (s || f || fm || sn || sd || !collapsed) ? 'hidden' : ''
 })
 
 // Clear the tag-derived prefill once the filter manager closes, so reopening

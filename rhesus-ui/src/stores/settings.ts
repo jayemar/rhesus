@@ -1,12 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { getUiSettings, setUiSettings } from '@/api/settings'
+import { isSnoozeAvailable } from '@/api/snooze'
+import { isSelfDestructAvailable } from '@/api/selfDestruct'
 import { DEFAULT_SETTINGS, type UiSettings } from '@/types/api'
 
 export const useSettingsStore = defineStore('settings', () => {
   const settings = ref<UiSettings>({ ...DEFAULT_SETTINGS })
   const username = ref<string>('')
   const loaded = ref(false)
+  const snoozeAvailable = ref(false)
+  const selfDestructAvailable = ref(false)
 
   const FONT_FAMILY_MAP: Record<string, string> = {
     system: "system-ui, -apple-system, sans-serif",
@@ -27,6 +31,14 @@ export const useSettingsStore = defineStore('settings', () => {
     loaded.value = true
     applyTheme(settings.value.theme)
     applyFont(settings.value.font_size, settings.value.font_family)
+  }
+
+  async function checkSnoozeAvailable() {
+    snoozeAvailable.value = await isSnoozeAvailable()
+  }
+
+  async function checkSelfDestructAvailable() {
+    selfDestructAvailable.value = await isSelfDestructAvailable()
   }
 
   async function save() {
@@ -77,5 +89,15 @@ export const useSettingsStore = defineStore('settings', () => {
     { deep: true },
   )
 
-  return { settings, username, loaded, load, save }
+  return {
+    settings,
+    username,
+    loaded,
+    snoozeAvailable,
+    selfDestructAvailable,
+    load,
+    save,
+    checkSnoozeAvailable,
+    checkSelfDestructAvailable,
+  }
 })

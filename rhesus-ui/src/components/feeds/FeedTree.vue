@@ -239,6 +239,42 @@ function withAllArticlesCount(items: ApiFeedTreeItem[], count: number): ApiFeedT
   })
 }
 
+// Overrides the row matching the current feedsStore.selection with
+// feedsStore.selectedUnreadCount - the exact same value the header shows -
+// so the two can never visibly disagree while that row is selected (see
+// selectedUnreadCount's doc comment in stores/feeds.ts for why this used to
+// drift: the header applied an optimistic delta for reads/stars taken since
+// the last tree fetch, the sidebar only ever showed the raw fetched count).
+// Only applies to rows where the header and sidebar already mean the same
+// "unread count" metric - Starred/Labels/"All articles" intentionally show
+// a TOTAL count in the sidebar instead (see withStarredCount/withLabelCounts/
+// withAllArticlesCount above), which selectedUnreadCount doesn't compute for
+// those (except Starred, whose formula happens to already match).
+function isUnreadCountSelection(sel: import('@/stores/feeds').FeedSelection): boolean {
+  if (sel.id === -1 && !sel.isCategory) return false // Starred: total count (formula matches anyway)
+  if (!sel.isCategory && sel.id <= -1025) return false // Label: total count
+  if (!sel.isCategory && sel.id === -4 && sel.viewMode !== 'unread') return false // "All articles": total count
+  return true
+}
+
+function withSelectedUnreadCount(
+  items: ApiFeedTreeItem[],
+  sel: import('@/stores/feeds').FeedSelection,
+  count: number,
+): ApiFeedTreeItem[] {
+  return items.map((item) => {
+    if (sel.isCategory) {
+      if (item.type === 'category' && item.bare_id === sel.id) return { ...item, unread: count }
+    } else if (item.type === 'feed' && item.bare_id === sel.id && (item.viewMode ?? undefined) === (sel.viewMode ?? undefined)) {
+      return { ...item, unread: count }
+    }
+    if (item.type === 'category' && item.items) {
+      return { ...item, items: withSelectedUnreadCount(item.items, sel, count) }
+    }
+    return item
+  })
+}
+
 const treeWithUnread = computed(() => {
   const withRealCounts = withRealUnreadCounts(tree.value, feedCounters.value, categoryCounters.value)
   const allArticlesFeed = findInTree(withRealCounts, -4)
@@ -254,7 +290,13 @@ const treeWithUnread = computed(() => {
   const withVirtual = insertAfter(withRealCounts, -4, virtual)
   const withAllCount = withAllArticlesCount(withVirtual, allArticlesCount.value)
   const starredTotal = Math.max(0, starredCount.value + articlesStore.starredCountDelta)
-  return withLabelCounts(withStarredCount(withAllCount, starredTotal), labelCounts.value)
+  const withOverrides = withLabelCounts(withStarredCount(withAllCount, starredTotal), labelCounts.value)
+
+  const sel = feedsStore.selection
+  if (sel && isUnreadCountSelection(sel)) {
+    return withSelectedUnreadCount(withOverrides, sel, feedsStore.selectedUnreadCount)
+  }
+  return withOverrides
 })
 
 const organizedTree = computed((): TreeRow[] => {

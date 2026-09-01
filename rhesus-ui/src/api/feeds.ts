@@ -78,7 +78,7 @@ export async function addFeed(feedUrl: string, categoryId: number): Promise<Subs
 
 export async function editFeed(
   feedId: number,
-  params: { title?: string; feed_url?: string; cat_id?: number; update_interval?: number; note?: string },
+  params: { title?: string; feed_url?: string; site_url?: string; cat_id?: number; update_interval?: number; note?: string },
 ): Promise<void> {
   await call('editFeed', { feed_id: feedId, ...params })
 }
@@ -86,6 +86,14 @@ export async function editFeed(
 export async function getFeedNotes(): Promise<Record<number, string>> {
   const res = await call<{ notes: Record<number, string> }>('getFeedNotes')
   return res.notes ?? {}
+}
+
+// TT-RSS core's own getFeeds API doesn't return site_url at all, even
+// though it's a real ttrss_feeds column - this is a Rhesus-owned endpoint
+// filling that gap, mirroring getFeedNotes()'s shape.
+export async function getFeedSiteUrls(): Promise<Record<number, string>> {
+  const res = await call<{ urls: Record<number, string> }>('getFeedSiteUrls')
+  return res.urls ?? {}
 }
 
 // Uses a standalone endpoint rather than the JSON API's call() helper: the

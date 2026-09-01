@@ -1,8 +1,19 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 import { getFeedTree, getStarredCount, getLabelCounts, getAllArticlesCount, getCounters } from '@/api/feeds'
 import type { ApiFeedTreeItem } from '@/types/api'
 import { useArticlesStore } from './articles'
+
+function findInTree(items: ApiFeedTreeItem[], bareId: number): ApiFeedTreeItem | undefined {
+  for (const item of items) {
+    if (item.bare_id === bareId) return item
+    if (item.items) {
+      const found = findInTree(item.items, bareId)
+      if (found) return found
+    }
+  }
+  return undefined
+}
 
 export interface FeedSelection {
   id: number
@@ -73,8 +84,63 @@ export const useFeedsStore = defineStore('feeds', () => {
     selection.value = item
   }
 
+  // The single source of truth for "how many unread articles does the
+  // currently-selected feed/category have", shared by both the header
+  // (AppShell.vue) and the sidebar row for that same selection
+  // (FeedTree.vue) - they used to compute this independently (the header
+  // applying articlesStore's optimistic readCountDelta/starredCountDelta,
+  // the sidebar only ever showing the raw last-fetched server count) and
+  // could visibly disagree for as long as it took the next loadTree() to
+  // land. Centralizing it here means there's only one place this logic can
+  // drift from the other.
+  const baseServerUnread = ref(0)
+
+  watchEffect(() => {
+    const sel = selection.value
+    const articlesStore = useArticlesStore()
+    if (!sel) { baseServerUnread.value = 0; return }
+    // Starred is a total-count feed (see starredCount below), not an
+    // unread-count one like every other feed, so this can't come from the
+    // regular counters lookup below.
+    if (sel.id === -1 && !sel.isCategory) {
+      baseServerUnread.value = starredCount.value
+      return
+    }
+    // getFeedTree's own "unread" field is a real number only for the
+    // hardcoded virtual feeds under "Special" - for every ordinary feed or
+    // user category it's a bogus -1 sentinel (confirmed directly against a
+    // live server response). feedCounters/categoryCounters (from the
+    // dedicated getCounters() call) carry the real numbers TT-RSS's own web
+    // client cross-references instead. Feed and category ids share the same
+    // positive-integer namespace, so which map to check depends on
+    // sel.isCategory.
+    const real = sel.isCategory ? categoryCounters.value[sel.id] : feedCounters.value[sel.id]
+    if (real !== undefined) {
+      baseServerUnread.value = real
+      articlesStore.readCountDelta = 0
+      return
+    }
+    // Fallback for anything getCounters() hasn't caught up with yet (e.g. a
+    // feed subscribed moments ago, before the next counters refresh).
+    const node = findInTree(tree.value, sel.id)
+    if (node && node.unread >= 0) {
+      baseServerUnread.value = node.unread
+      articlesStore.readCountDelta = 0
+    }
+  })
+
+  const selectedUnreadCount = computed(() => {
+    const articlesStore = useArticlesStore()
+    const sel = selection.value
+    if (sel?.id === -1 && !sel.isCategory) {
+      return Math.max(0, baseServerUnread.value + articlesStore.starredCountDelta)
+    }
+    return Math.max(0, baseServerUnread.value - articlesStore.readCountDelta)
+  })
+
   return {
     tree, selection, loading, starredCount, labelCounts, allArticlesCount, feedCounters, categoryCounters,
+    selectedUnreadCount,
     loadTree, loadStarredCount, loadLabelCounts, loadAllArticlesCount, loadFeedCounters, adjustLabelCount, select,
   }
 })

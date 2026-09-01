@@ -24,6 +24,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_api_method("setFilterEnabled", $this);
         $host->add_api_method("editFeed", $this);
         $host->add_api_method("getFeedNotes", $this);
+        $host->add_api_method("getFeedSiteUrls", $this);
         $host->add_api_method("removeFeedIcon", $this);
         $host->add_api_method("fetchIconFromUrl", $this);
         $host->add_api_method("importOpml", $this);
@@ -388,6 +389,12 @@ class Rhesus_Settings extends Plugin {
                 $feed->feed_url = $feed_url;
             }
         }
+        if (isset($_REQUEST['site_url'])) {
+            // Unlike feed_url, an empty site_url is a normal, valid state
+            // (not every feed has one) - so blanking the field is allowed
+            // to actually clear it, not silently ignored.
+            $feed->site_url = trim($_REQUEST['site_url']);
+        }
         if (isset($_REQUEST['cat_id'])) {
             $cat_id = (int)$_REQUEST['cat_id'];
             $feed->cat_id = $cat_id > 0 ? $cat_id : null;
@@ -424,6 +431,30 @@ class Rhesus_Settings extends Plugin {
             return [1, ["error" => "NOT_LOGGED_IN"]];
         }
         return [0, ["notes" => $this->get_feed_notes_map()]];
+    }
+
+    // TT-RSS core's own getFeeds API method doesn't select site_url at all
+    // (see classes/API.php's _api_get_feeds()), even though it's a real
+    // ttrss_feeds column - this fills that gap without needing to patch
+    // core. Returns all of the current user's feeds' site_url as
+    // {feed_id: site_url}, omitting feeds where it's blank.
+    // Called via: POST /tt-rss/api/ {"op":"getFeedSiteUrls","sid":"..."}
+    public function getFeedSiteUrls(): array {
+        $uid = $_SESSION['uid'] ?? null;
+        if ($uid === null) {
+            return [1, ["error" => "NOT_LOGGED_IN"]];
+        }
+        $rows = ORM::for_table('ttrss_feeds')
+            ->select_many('id', 'site_url')
+            ->where('owner_uid', $uid)
+            ->where_not_equal('site_url', '')
+            ->find_many();
+
+        $urls = [];
+        foreach ($rows as $row) {
+            $urls[(int)$row->id] = $row->site_url;
+        }
+        return [0, ["urls" => $urls]];
     }
 
     // Total starred article count (read + unread). Native TT-RSS's

@@ -73,6 +73,23 @@
         <label class="field-label">Title</label>
         <input v-model="title" class="field-input" placeholder="Title" maxlength="250" />
 
+        <label class="field-label">Site URL</label>
+        <div class="url-row">
+          <input
+            v-model="siteUrl"
+            class="field-input url-input"
+            type="url"
+            placeholder="Site URL"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+          />
+          <a class="url-link" :href="siteUrl || undefined" target="_blank" rel="noopener noreferrer" title="Open site URL" :tabindex="siteUrl ? 0 : -1">
+            <ExternalLink :size="13" />
+          </a>
+        </div>
+
         <label class="field-label">Feed URL</label>
         <div class="url-row">
           <input
@@ -125,7 +142,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ExternalLink, Loader2, Rss, X } from 'lucide-vue-next'
-import { getAllFeeds, getAllCategories, getFeedNotes, editFeed, deleteFeed, uploadFeedIcon, removeFeedIcon, fetchIconFromUrl, refreshFeed, logUnsubscribeReason } from '@/api/feeds'
+import { getAllFeeds, getAllCategories, getFeedNotes, getFeedSiteUrls, editFeed, deleteFeed, uploadFeedIcon, removeFeedIcon, fetchIconFromUrl, refreshFeed, logUnsubscribeReason } from '@/api/feeds'
 import { ApiError } from '@/api/client'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { useFeedsStore } from '@/stores/feeds'
@@ -142,6 +159,7 @@ const categories = ref<ApiCategory[]>([])
 
 const title = ref('')
 const feedUrl = ref('')
+const siteUrl = ref('')
 const catId = ref(0)
 const note = ref('')
 const saving = ref(false)
@@ -168,13 +186,14 @@ const iconUrl = computed(() => {
 onMounted(async () => {
   loading.value = true
   try {
-    const [feeds, cats, notes] = await Promise.all([getAllFeeds(), getAllCategories(), getFeedNotes()])
+    const [feeds, cats, notes, siteUrls] = await Promise.all([getAllFeeds(), getAllCategories(), getFeedNotes(), getFeedSiteUrls()])
     categories.value = cats.filter((c) => c.id > 0).sort((a, b) => a.title.localeCompare(b.title))
     const found = feeds.find((f) => f.id === props.feedId) ?? null
     feed.value = found
     if (found) {
       title.value = found.title
       feedUrl.value = found.feed_url
+      siteUrl.value = siteUrls[found.id] ?? ''
       catId.value = found.cat_id ?? 0
       note.value = notes[found.id] ?? ''
     }
@@ -274,7 +293,7 @@ async function save() {
     const newTitle = title.value.trim() || feed.value.title
     const newUrl = feedUrl.value.trim() || feed.value.feed_url
     const urlChanged = newUrl !== feed.value.feed_url
-    await editFeed(feed.value.id, { title: newTitle, feed_url: newUrl, cat_id: catId.value, note: note.value.trim() })
+    await editFeed(feed.value.id, { title: newTitle, feed_url: newUrl, site_url: siteUrl.value.trim(), cat_id: catId.value, note: note.value.trim() })
     if (urlChanged) {
       await refreshFeed(feed.value.id)
       await editFeed(feed.value.id, { update_interval: 0 })

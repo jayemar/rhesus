@@ -61,7 +61,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useArticlesStore } from '@/stores/articles'
 import { writeToClipboard } from '@/utils/clipboard'
 import { externalLinkDomain, originOf } from '@/utils/url'
-import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes } from '@/utils/text'
+import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities } from '@/utils/text'
 import type { ApiArticle } from '@/types/api'
 
 const props = defineProps<{
@@ -134,6 +134,7 @@ function excerptFromContent(content: string): string {
   const div = document.createElement('div')
   div.innerHTML = fixUnescapedDataAttributeQuotes(content)
   div.querySelectorAll('style, script').forEach((el) => el.remove())
+  decodeResidualEntities(div)
   return stripInvisibleEntityArtifacts(div.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 

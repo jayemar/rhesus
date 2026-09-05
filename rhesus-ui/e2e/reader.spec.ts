@@ -121,6 +121,28 @@ test('clicking feed name in reader byline navigates to that feed and closes the 
   await expect(page.locator('.reader-overlay')).not.toBeVisible()
 })
 
+test('viewing an image full-size and pressing back closes only the lightbox, not the article', async ({ page }) => {
+  let lightboxImg = page.locator('.reader-hero, .reader-content img, .reader-attachment img').first()
+
+  for (let i = 0; i < 10; i++) {
+    await page.locator('.card').nth(i).click()
+    await expect(page.locator('.reader-overlay')).toBeVisible({ timeout: 10000 })
+
+    lightboxImg = page.locator('.reader-hero, .reader-content img, .reader-attachment img').first()
+    if (await lightboxImg.count() > 0) break
+    await page.locator('.reader-close').click()
+  }
+
+  await expect(lightboxImg).toBeVisible({ timeout: 10000 })
+  await lightboxImg.click()
+  await expect(page.locator('.lightbox')).toBeVisible({ timeout: 5000 })
+
+  await page.goBack()
+
+  await expect(page.locator('.lightbox')).not.toBeVisible()
+  await expect(page.locator('.reader-overlay')).toBeVisible()
+})
+
 test('note editor save button has dark text in dark mode', async ({ page }) => {
   await page.evaluate(() => {
     document.documentElement.setAttribute('data-theme', 'dark')

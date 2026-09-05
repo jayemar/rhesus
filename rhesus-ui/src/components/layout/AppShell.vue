@@ -183,7 +183,7 @@
                 >{{ readerAuthor }}</span>
                 <span>{{ formatArticleDate(readerDate) }}</span>
               </div>
-              <ArticleReader :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" />
+              <ArticleReader ref="articleReaderRef" :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" />
             </div>
           </div>
         </div>
@@ -289,6 +289,7 @@ const suppressNextSidebarCollapse = ref(true)
 
 const readerScrollEl = ref<HTMLElement | null>(null)
 const readerOverlayEl = ref<HTMLElement | null>(null)
+const articleReaderRef = ref<InstanceType<typeof ArticleReader> | null>(null)
 const readerScrollProgress = ref(0)
 const showScrollTop = ref(false)
 
@@ -530,6 +531,10 @@ watch(selectedId, (newId, oldId) => {
 })
 
 function onPopState() {
+  // The lightbox pushes its own history entry and handles this same popstate
+  // itself (see ArticleReader.vue's onLightboxPopstate) - if it's still open
+  // here, this pop is just closing the lightbox, not the article.
+  if (articleReaderRef.value?.isLightboxOpen) return
   showScrollTop.value = false
   historyPushed.value = false
   articlesStore.select(null)

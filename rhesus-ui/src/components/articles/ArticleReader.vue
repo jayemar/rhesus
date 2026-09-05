@@ -821,29 +821,27 @@ async function openLightbox(src: string, alt: string) {
   lightboxSrc.value = src
   lightboxAlt.value = alt
   history.pushState({ lightbox: true }, '')
-  // Capture phase so stopImmediatePropagation() blocks AppShell's bubble-phase handler.
-  window.addEventListener('popstate', onLightboxPopstate, { capture: true })
+  window.addEventListener('popstate', onLightboxPopstate)
   document.addEventListener('keydown', onLightboxKey)
   await nextTick()
   attachLightboxZoomListeners()
 }
 
+// Just triggers the history pop; onLightboxPopstate does the actual cleanup
+// once it fires, whether that's from this back() call or a native back-button
+// press. Popstate fires on window itself, so capture vs. bubble listeners
+// there run in registration order rather than capture-before-bubble - trying
+// to race AppShell's own popstate handler with stopImmediatePropagation()
+// doesn't work. Instead AppShell checks isLightboxOpen (see defineExpose
+// below) and skips closing the article while the lightbox is still open.
 function closeLightbox() {
   if (!lightboxSrc.value) return
-  detachLightboxZoomListeners()
-  window.removeEventListener('popstate', onLightboxPopstate, { capture: true })
-  document.removeEventListener('keydown', onLightboxKey)
-  lightboxSrc.value = null
-  // Suppress the popstate that history.back() fires so AppShell doesn't close the reader.
-  const suppress = (e: PopStateEvent) => { e.stopImmediatePropagation() }
-  window.addEventListener('popstate', suppress, { capture: true, once: true })
   history.back()
 }
 
-function onLightboxPopstate(e: PopStateEvent) {
-  e.stopImmediatePropagation()
+function onLightboxPopstate() {
   detachLightboxZoomListeners()
-  window.removeEventListener('popstate', onLightboxPopstate, { capture: true })
+  window.removeEventListener('popstate', onLightboxPopstate)
   document.removeEventListener('keydown', onLightboxKey)
   lightboxSrc.value = null
 }
@@ -1153,6 +1151,7 @@ async function openLabelMenu(event: MouseEvent) {
 defineExpose({
   isLabelMenuOpen: computed(() => showLabelMenu.value),
   closeLabelMenuForBackButton: () => { showLabelMenu.value = false },
+  isLightboxOpen: computed(() => lightboxSrc.value !== null),
 })
 
 function syncLabelsToStore() {

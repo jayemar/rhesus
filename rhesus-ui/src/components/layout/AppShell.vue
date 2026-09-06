@@ -184,7 +184,7 @@
                 >{{ readerAuthor }}</span>
                 <span>{{ formatArticleDate(readerDate) }}</span>
               </div>
-              <ArticleReader ref="articleReaderRef" :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" />
+              <ArticleReader ref="articleReaderRef" :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" @edit-feed="deepLinkEditFeedId = $event" />
             </div>
           </div>
         </div>

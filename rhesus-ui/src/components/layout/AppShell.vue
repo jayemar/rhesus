@@ -23,8 +23,9 @@
         ><Search :size="16" /></button>
         <button class="icon-btn" title="Refresh" @pointerdown="onIconBtnPointerDown" @click="refresh"><RefreshCw :size="16" /></button>
         <button class="icon-btn" :title="themeLabel" @pointerdown="onIconBtnPointerDown" @click="toggleTheme">
-          <Sun v-if="effectiveTheme === 'dark'" :size="16" />
-          <Moon v-else :size="16" />
+          <Monitor v-if="settings.theme === 'system'" :size="16" />
+          <Moon v-else-if="settings.theme === 'dark'" :size="16" />
+          <Sun v-else :size="16" />
         </button>
         <button class="icon-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'" @pointerdown="onIconBtnPointerDown" @click="toggleFullscreen">
           <Minimize2 v-if="isFullscreen" :size="16" />
@@ -226,7 +227,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { VNode } from 'vue'
-import { Menu, CheckCheck, RefreshCw, Sun, Moon, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter, MoreVertical, AlarmClock, Flame } from 'lucide-vue-next'
+import { Menu, CheckCheck, RefreshCw, Sun, Moon, Monitor, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter, MoreVertical, AlarmClock, Flame } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useFeedsStore } from '@/stores/feeds'
@@ -599,21 +600,28 @@ function openFeedUrl() {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-const effectiveTheme = computed(() => {
-  if (settings.value.theme !== 'system') return settings.value.theme
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-})
+// The toolbar button cycles through the same three values the Theme select in
+// SettingsPanel offers, so the two controls cannot disagree. The icon shows the
+// theme that is currently *set* rather than the one a click would move to -
+// with three states 'system' is otherwise indistinguishable from whichever of
+// light/dark it happens to resolve to right now.
+const THEME_CYCLE = ['light', 'dark', 'system'] as const
 
-const themeLabel = computed(() =>
-  effectiveTheme.value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
-)
+const THEME_NEXT_LABEL: Record<UiSettings['theme'], string> = {
+  light: 'Theme: light. Switch to dark',
+  dark: 'Theme: dark. Switch to system',
+  system: 'Theme: system. Switch to light',
+}
+
+const themeLabel = computed(() => THEME_NEXT_LABEL[settings.value.theme])
 
 function toggleSidebar() {
   settings.value.sidebar_collapsed = !settings.value.sidebar_collapsed
 }
 
 function toggleTheme() {
-  settings.value.theme = effectiveTheme.value === 'dark' ? 'light' : 'dark'
+  const i = THEME_CYCLE.indexOf(settings.value.theme as (typeof THEME_CYCLE)[number])
+  settings.value.theme = THEME_CYCLE[(i + 1) % THEME_CYCLE.length]!
 }
 
 async function markAll() {

@@ -566,6 +566,14 @@ watch(selectedId, (newId, oldId) => {
 })
 
 function onPopState() {
+  // The label popup consumes a back-press to close itself rather than
+  // exiting the article - re-push the article's own history entry so the
+  // pop we just absorbed doesn't leave the article one back-press short.
+  if (articleReaderRef.value?.isLabelMenuOpen) {
+    articleReaderRef.value.closeLabelMenuForBackButton()
+    history.pushState({ articleOverlay: true }, '')
+    return
+  }
   // The lightbox pushes its own history entry and handles this same popstate
   // itself (see ArticleReader.vue's onLightboxPopstate) - if it's still open
   // here, this pop is just closing the lightbox, not the article.
@@ -581,6 +589,11 @@ function focusOverlay(vnode: VNode) {
 
 function closeReader() {
   showScrollTop.value = false
+  // Closing via the close button or Escape (rather than the back button)
+  // should always close the article outright, even if the label popup
+  // happens to be open - reset it first so onPopState doesn't mistake the
+  // history.back() below for a back-press that should only close the popup.
+  articleReaderRef.value?.closeLabelMenuForBackButton()
   if (historyPushed.value) {
     historyPushed.value = false
     history.back()

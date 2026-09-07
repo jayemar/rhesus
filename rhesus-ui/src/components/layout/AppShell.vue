@@ -501,7 +501,26 @@ watch(
 // Lock document scroll while an overlay panel is open so the article list
 // behind it cannot scroll through touch inertia or mis-fires.
 watch([showSettings, showFeedEditor, showFilterManager, showSnoozedPanel, showSelfDestructPanel, sidebarCollapsed], ([s, f, fm, sn, sd, collapsed]) => {
-  document.body.style.overflow = (s || f || fm || sn || sd || !collapsed) ? 'hidden' : ''
+  // The sidebar only becomes a full-screen takeover (hiding .main-content
+  // entirely - see the max-width: 600px block further down) below that same
+  // breakpoint. Above it, the sidebar sits beside a fully visible,
+  // interactive main-content - locking body scroll just because the
+  // sidebar happens to be expanded made the article list unscrollable
+  // there for no reason.
+  const sidebarIsFullScreenOverlay = !collapsed && window.matchMedia('(max-width: 600px)').matches
+  document.body.style.overflow = (s || f || fm || sn || sd || sidebarIsFullScreenOverlay) ? 'hidden' : ''
+})
+
+// On mobile (<=600px), opening the sidebar hides .main-content entirely via
+// display: none (see the max-width: 600px block below) - which collapses
+// the window's scrollable height while it's hidden. Browsers don't restore
+// the previous scroll position once a hidden element's display is restored;
+// it just stays wherever it got clamped to (usually the top). Capturing and
+// restoring scrollY around the toggle fixes that on mobile and is a no-op
+// on wider viewports, where main-content is never actually hidden.
+watch(sidebarCollapsed, () => {
+  const savedScrollY = window.scrollY
+  nextTick(() => window.scrollTo(0, savedScrollY))
 })
 
 // Clear the tag-derived prefill once the filter manager closes, so reopening

@@ -368,6 +368,7 @@
             type="datetime-local"
             class="snooze-datetime-input"
             :disabled="snoozing"
+            @change="confirmCustomSnooze"
           />
           <button
             class="tag-filter-create-btn"
@@ -392,6 +393,7 @@
             type="datetime-local"
             class="snooze-datetime-input"
             :disabled="selfDestructing"
+            @change="confirmCustomSelfDestruct"
           />
           <button
             class="tag-filter-create-btn"
@@ -627,6 +629,13 @@ async function confirmSnooze(until: Date) {
   }
 }
 
+// Also wired to the datetime-local input's own @change (see template) - on
+// mobile, tapping the native picker's OK button fires change without ever
+// touching the "Snooze" button below it, and previously did nothing but
+// fill the field, leaving the dropdown open. change also fires on
+// desktop once the field is committed (blur/Enter), so this doubles as
+// that platform's "I'm done" signal too - the guards below (blank/invalid
+// value) keep either path a no-op until a real date is actually set.
 function confirmCustomSnooze() {
   if (!snoozeCustomValue.value) return
   const until = new Date(snoozeCustomValue.value)
@@ -673,6 +682,8 @@ async function confirmSelfDestruct(until: Date) {
   }
 }
 
+// Also wired to the datetime-local input's own @change - see
+// confirmCustomSnooze()'s comment above, same reasoning applies here.
 function confirmCustomSelfDestruct() {
   if (!selfDestructCustomValue.value) return
   const until = new Date(selfDestructCustomValue.value)

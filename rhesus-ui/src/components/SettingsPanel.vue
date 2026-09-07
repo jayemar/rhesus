@@ -130,6 +130,13 @@
       </a>
     </section>
 
+    <section class="links-section">
+      <h3>Rhesus Share</h3>
+      <a href="/rhesus-share.xpi" target="_blank" rel="noopener noreferrer" class="ttrss-link">
+        Download Rhesus Share extension <ExternalLink :size="13" class="ttrss-link-icon" />
+      </a>
+    </section>
+
     </div>
   </div>
 </template>

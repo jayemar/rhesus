@@ -301,8 +301,23 @@ function onReaderTouchStart(e: TouchEvent) {
 }
 
 function onReaderTouchMove(e: TouchEvent) {
+  // Floating panels (note editor, search bar, scroll-triggered toolbar) are
+  // teleported to .reader-overlay, an ancestor of .reader-scroll rather
+  // than a descendant of it - since scrollEl.contains() below is false for
+  // anything inside them, every touchmove there used to get preventDefault()'d
+  // by the "not in the scrollable content, must be background/toolbar"
+  // branch. That's meant to stop background scroll/bounce, but it also
+  // blocked the note editor's own textarea from scrolling internally when
+  // a note is longer than the box - preventDefault() on touchmove suppresses
+  // the browser's default scroll target for that gesture entirely, not just
+  // page-level scroll. Exempt them so their own native touch behavior (text
+  // selection, textarea scrolling, etc.) works normally.
+  const target = e.target as Node
+  if (target instanceof Element && target.closest('.floating-note, .floating-search, .floating-toolbar')) {
+    return
+  }
   const scrollEl = readerScrollEl.value
-  if (!scrollEl || !scrollEl.contains(e.target as Node)) {
+  if (!scrollEl || !scrollEl.contains(target)) {
     e.preventDefault()
     return
   }

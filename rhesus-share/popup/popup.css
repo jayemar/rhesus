@@ -28,24 +28,31 @@
 }
 
 body {
-  width: 340px;
-  padding: 16px;
+  width: 100%;
+  max-width: 420px;
+  padding: 20px;
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.4;
 }
 
 h1 {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: #1565c0;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 @media (prefers-color-scheme: dark) {
   h1 { color: #bbdefb; }
+}
+
+.version {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
 }
 
 .field {
@@ -54,23 +61,23 @@ h1 {
 
 label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-muted);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 input, textarea {
   width: 100%;
-  padding: 7px 9px;
+  padding: 9px 11px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
   background: var(--color-surface);
   color: var(--color-text);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.4;
 }
 
@@ -80,7 +87,7 @@ input[readonly] {
 }
 
 textarea {
-  height: 68px;
+  height: 100px;
   resize: vertical;
 }
 
@@ -103,13 +110,13 @@ input:focus, textarea:focus {
 }
 
 button {
-  padding: 7px 16px;
+  padding: 9px 18px;
   border: none;
   border-radius: 4px;
   background: #1565c0;
   color: #ffffff;
   font-family: var(--font);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   flex-shrink: 0;
@@ -125,7 +132,7 @@ button:disabled {
 }
 
 .status {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--color-text-muted);
   min-width: 0;
   overflow: hidden;
@@ -144,7 +151,7 @@ button:disabled {
   border: none;
   color: #1565c0;
   font-family: var(--font);
-  font-size: 12px;
+  font-size: 14px;
   text-decoration: underline;
   cursor: pointer;
 }

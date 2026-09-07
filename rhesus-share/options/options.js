@@ -1,6 +1,8 @@
 'use strict';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  document.getElementById('version').textContent = 'v' + browser.runtime.getManifest().version;
+
   const urlEl = document.getElementById('ttrss-url');
   const usernameEl = document.getElementById('username');
   const passwordEl = document.getElementById('password');

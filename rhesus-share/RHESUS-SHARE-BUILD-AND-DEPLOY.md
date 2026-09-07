@@ -2,6 +2,10 @@
 
 Firefox for Android only installs extensions signed by Mozilla. These steps
 cover getting the extension signed, hosting it, and installing it on device.
+There is no unpacked/temporary-load option on Android, so any code change -
+however small - requires repeating Steps 2-3 (re-sign/re-host, reinstall)
+before it can be tested or used on device. Bump the `version` in
+`manifest.json` on each rebuild so it's clear a new build is installed.
 
 **AMO:** addons.mozilla.org
 
@@ -11,25 +15,15 @@ cover getting the extension signed, hosting it, and installing it on device.
 2. Go to https://addons.mozilla.org/developers/addon/api/key/ and generate
    an API key. Mozilla calls these "JWT issuer" and "JWT secret".
 
-## Step 2 - Sign the extension
+## Step 2 - Sign and host the extension
 
-From the `rhesus-share/` directory:
+Copy `.env.example` to `.env` in `rhesus-share/` and fill in `AMO_JWT_ISSUER`
+and `AMO_JWT_SECRET` with the API key from Step 1 (one-time setup; `.env` is
+gitignored).
 
-```
-npx web-ext sign --api-key=<JWT issuer> --api-secret=<JWT secret> --channel=unlisted
-```
-
-`--channel=unlisted` means the extension is never listed publicly on AMO but
-is still signed by Mozilla. The signed `.xpi` is written to
-`web-ext-artifacts/rhesus_share-<version>.xpi`.
-
-Re-run this command after any code changes to produce an updated signed file.
-The extension ID in `manifest.json` keeps the same AMO record across versions.
-
-## Step 3 - Host the `.xpi`
-
-Serve the signed file from the homelab nginx so it is reachable via Tailscale.
-The nginx config already contains the required location block in `rhesus-server/nginx.conf`:
+The nginx config already contains the location block needed to serve the
+`.xpi` over Tailscale, in `rhesus-server/nginx.conf` (one-time setup, already
+in place):
 
 ```nginx
 location /rhesus-share.xpi {
@@ -38,18 +32,31 @@ location /rhesus-share.xpi {
 }
 ```
 
-Copy the signed file into the running rhesus-server container:
+From the `rhesus-share/` directory:
 
 ```
-docker cp web-ext-artifacts/rhesus_share-<version>.xpi ttrss-rhesus-server-1:/usr/share/nginx/html/rhesus-share.xpi
+./sign.sh
 ```
+
+This reads the credentials from `.env`, runs `web-ext sign --channel=unlisted`,
+then copies the resulting `.xpi` into the running rhesus-server container at
+`/usr/share/nginx/html/rhesus-share.xpi` (override the container name or path
+via `DOCKER_CONTAINER`/`NGINX_XPI_PATH` in `.env` if needed). `--channel=unlisted`
+means the extension is never listed publicly on AMO but is still signed by
+Mozilla. web-ext names the signed `.xpi` file after the extension's internal
+ID, not `manifest.json`'s `version`, so `sign.sh` locates it automatically
+rather than assuming a fixed name.
 
 The copy takes effect immediately - no container restart needed. Note that the
-file does not survive a container recreate; re-run the `docker cp` command
-after any `docker compose pull rhesus-server && docker compose up -d
-rhesus-server` (which picks up a newly published image).
+file does not survive a container recreate; re-run `./sign.sh` (or a manual
+`docker cp`) after any `docker compose pull rhesus-server && docker compose up
+-d rhesus-server` (which picks up a newly published image).
 
-## Step 4 - Install on Firefox for Android
+Re-run this step after any code change to produce and host an updated signed
+file - bump `version` in `manifest.json` first (see note above). The
+extension ID in `manifest.json` keeps the same AMO record across versions.
+
+## Step 3 - Install on Firefox for Android
 
 AMO custom collections only work with publicly listed extensions. Since this
 extension is unlisted, the collection approach does not apply. Use the
@@ -80,5 +87,5 @@ TT-RSS URL and credentials.
 **Updating:**
 
 Automatic updates do not work for unlisted extensions. To install a new
-version, sign and copy the updated `.xpi` (Steps 2-3), download it to the
+version, sign and host the updated `.xpi` (Step 2), download it to the
 device, and repeat the install steps above.

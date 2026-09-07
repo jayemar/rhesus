@@ -114,6 +114,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const saveBtn = document.getElementById('save');
   const statusEl = document.getElementById('status');
   const settingsBtn = document.getElementById('settings-link');
+  const versionEl = document.getElementById('version');
+
+  versionEl.textContent = 'v' + browser.runtime.getManifest().version;
 
   const tabs = await browser.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];

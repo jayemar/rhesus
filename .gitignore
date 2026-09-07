@@ -1,5 +1,6 @@
 rhesus-share/web-ext-artifacts/
 rhesus-share/.env
 rhesus-share/.amo-upload-uuid
+rhesus-share/rhesus-share-*.xpi
 rhesus_settings/.phpunit.result.cache
 rhesus_settings/vendor/bin/.phpunit.result.cache

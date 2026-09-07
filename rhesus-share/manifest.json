@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Rhesus Share",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Save the current page to TT-RSS as a published article with an optional note, and an option to automatically star it too",
   "browser_specific_settings": {
     "gecko": {

@@ -101,6 +101,7 @@
         <div
           v-if="showSettings"
           class="settings-overlay"
+          :class="{ 'settings-overlay--over-reader': !!selectedArticle }"
           tabindex="-1"
           @vue:mounted="focusOverlay"
           @keydown.esc="showSettings = false"
@@ -113,6 +114,7 @@
         <div
           v-if="showFeedEditor"
           class="settings-overlay"
+          :class="{ 'settings-overlay--over-reader': !!selectedArticle }"
           tabindex="-1"
           @vue:mounted="focusOverlay"
           @keydown.esc="showFeedEditor = false"
@@ -125,6 +127,7 @@
         <div
           v-if="showFilterManager"
           class="settings-overlay"
+          :class="{ 'settings-overlay--over-reader': !!selectedArticle }"
           tabindex="-1"
           @vue:mounted="focusOverlay"
           @keydown.esc="showFilterManager = false"
@@ -137,6 +140,7 @@
         <div
           v-if="showSnoozedPanel"
           class="settings-overlay"
+          :class="{ 'settings-overlay--over-reader': !!selectedArticle }"
           tabindex="-1"
           @vue:mounted="focusOverlay"
           @keydown.esc="showSnoozedPanel = false"
@@ -149,6 +153,7 @@
         <div
           v-if="showSelfDestructPanel"
           class="settings-overlay"
+          :class="{ 'settings-overlay--over-reader': !!selectedArticle }"
           tabindex="-1"
           @vue:mounted="focusOverlay"
           @keydown.esc="showSelfDestructPanel = false"
@@ -184,7 +189,7 @@
                 >{{ readerAuthor }}</span>
                 <span>{{ formatArticleDate(readerDate) }}</span>
               </div>
-              <ArticleReader ref="articleReaderRef" :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" @edit-feed="deepLinkEditFeedId = $event" />
+              <ArticleReader ref="articleReaderRef" :article="selectedArticle" :scrolled="showScrollTop" @close="closeReader" @copied="showCopyToast" @scroll-to-top="scrollToTop" @create-filter-from-tags="onCreateFilterFromTags" @full-content-meta="onFullContentMeta" @edit-feed="deepLinkEditFeedId = $event" @manage-feeds="openManageFeedsPanel" />
             </div>
           </div>
         </div>
@@ -484,6 +489,41 @@ function closeDeepLinkEditFeed() {
     router.replace({ query })
   }
 }
+
+function openManageFeedsPanel() {
+  showSettings.value = false
+  showFilterManager.value = false
+  showFeedEditor.value = true
+  settings.value.sidebar_collapsed = true
+}
+
+// Same idea as ?editFeed=<id> above, but for the general Feed Management
+// panel itself (e.g. the af_feed_advisor health report's "Manage feeds"
+// link) rather than one specific feed's dialog. The primary path for this
+// is ArticleReader.vue's onContentClick(), which recognizes a same-page
+// "?manageFeeds=1" link and emits 'manage-feeds' (see @manage-feeds above)
+// straight into openManageFeedsPanel() without ever touching
+// window.location.hash - deliberately, since a real hash navigation here
+// would push a browser history entry on top of the reader's own
+// history.pushState() (see watch(selectedId, ...) below), and cancelling
+// that navigation still fires a native popstate that onPopState() can't
+// tell apart from a genuine back-press, incorrectly closing the article.
+//
+// This route-query watcher is just the fallback for when there's no
+// reader to intercept the click - e.g. the link opened directly in a
+// fresh tab/window - where a real navigation to "?manageFeeds=1" is the
+// only way to receive it at all, and there's no open article to lose.
+watch(
+  () => route.query.manageFeeds,
+  (manageFeeds) => {
+    if (!manageFeeds) return
+    openManageFeedsPanel()
+    const query = { ...route.query }
+    delete query.manageFeeds
+    router.replace({ query })
+  },
+  { immediate: true },
+)
 
 // On startup with no feed in URL, auto-navigate to All Articles with sidebar open.
 let startupDone = false
@@ -1106,7 +1146,14 @@ async function refresh() {
   left: var(--sidebar-width);
   right: 0;
   bottom: 0;
-  z-index: 20;
+  /* One above .reader-overlay's z-index: normally these two never coexist
+     (the topbar buttons that open Settings/Feed Management/etc. sit at
+     z-index 10, beneath the full-height reader-overlay, so they're
+     unreachable while reading), except when the health report's "Manage
+     feeds" link opens this panel directly while keeping the article open
+     (see openManageFeedsPanel() in the script below) - it needs to win
+     that stacking, not be hidden behind the still-open reader. */
+  z-index: 21;
   background: var(--color-bg);
   overflow: hidden;
   outline: none;
@@ -1114,6 +1161,17 @@ async function refresh() {
 }
 
 .sidebar-collapsed .settings-overlay {
+  left: 0;
+}
+
+/* When this panel is stacked on top of an open article (see
+   openManageFeedsPanel() and the "over-reader" class binding above), the
+   .reader-overlay behind it already covers the full viewport including
+   the topbar/sidebar - top: var(--topbar-height) here would otherwise
+   leave a gap at the top showing the reader poking through underneath,
+   since there's no normal topbar in that state to fill it. */
+.settings-overlay--over-reader {
+  top: 0;
   left: 0;
 }
 

@@ -451,6 +451,7 @@ const emit = defineEmits<{
   'create-filter-from-tags': [tags: string[]]
   'full-content-meta': [meta: { author?: string, publishedAt?: number }]
   'edit-feed': [feedId: number]
+  'manage-feeds': []
 }>()
 const articlesStore = useArticlesStore()
 const feedsStore = useFeedsStore()
@@ -885,7 +886,8 @@ function onContentClick(e: MouseEvent) {
       // The query string for a hash-routed URL lives inside the hash
       // fragment itself (e.g. "#/feed/698?editFeed=698"), not in url.search.
       const hashQuery = url.hash.split('?')[1]
-      const editFeedId = hashQuery ? Number(new URLSearchParams(hashQuery).get('editFeed')) : NaN
+      const params = hashQuery ? new URLSearchParams(hashQuery) : null
+      const editFeedId = params ? Number(params.get('editFeed')) : NaN
       if (editFeedId > 0) {
         // A deep link back to a specific feed's edit dialog (e.g. from the
         // feed health report) - open it directly without navigating away
@@ -894,6 +896,19 @@ function onContentClick(e: MouseEvent) {
         // underlying list to the clicked feed too, which is a bigger,
         // unwanted side effect of what's meant to be "just open a dialog."
         emit('edit-feed', editFeedId)
+        return
+      }
+      if (params?.has('manageFeeds')) {
+        // Same idea as editFeedId above, but for the general Feed
+        // Management panel - emit instead of navigating. Actually setting
+        // window.location.hash here (a real browser navigation) pushes a
+        // history entry on top of this reader's own history.pushState()
+        // (see AppShell.vue's watch(selectedId, ...)); cancelling that
+        // navigation via a router guard still fires a native popstate,
+        // which AppShell's onPopState() can't tell apart from a genuine
+        // back-press and reads as "close the article". Never touching the
+        // hash at all avoids that collision outright.
+        emit('manage-feeds')
         return
       }
       // Any other same-page link is genuine internal navigation - stay

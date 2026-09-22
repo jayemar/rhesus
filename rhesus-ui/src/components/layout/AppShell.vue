@@ -552,15 +552,30 @@ watch([showSettings, showFeedEditor, showFilterManager, showSnoozedPanel, showSe
 })
 
 // On mobile (<=600px), opening the sidebar hides .main-content entirely via
-// display: none (see the max-width: 600px block below) - which collapses
-// the window's scrollable height while it's hidden. Browsers don't restore
-// the previous scroll position once a hidden element's display is restored;
-// it just stays wherever it got clamped to (usually the top). Capturing and
-// restoring scrollY around the toggle fixes that on mobile and is a no-op
-// on wider viewports, where main-content is never actually hidden.
-watch(sidebarCollapsed, () => {
-  const savedScrollY = window.scrollY
-  nextTick(() => window.scrollTo(0, savedScrollY))
+// display: none (see the max-width: 600px block below), which collapses the
+// window's scrollable height while it's hidden - so scrollY reads 0 there
+// regardless of where the list actually was. A previous version of this fix
+// captured and restored scrollY symmetrically on every toggle, but that
+// broke in practice: the "restore" that runs right after *opening* fires
+// while main-content is already hidden, so window.scrollTo() has nothing to
+// scroll and just clamps to 0 - stamping the true position over with 0
+// before the *closing* toggle ever gets a chance to read it, so the list
+// always ended up back at the top. Only capture scrollY on the transition
+// where content is still visible (closed -> open) and only restore it on
+// the reverse transition (open -> closed, after nextTick's DOM patch has
+// made main-content visible again), so the saved value is never read back
+// through the intervening hidden state. Gated to the mobile breakpoint since
+// main-content is never actually hidden above it, where restoring an older
+// scrollY would fight any scrolling the user did while the sidebar was open.
+let scrollYBeforeSidebarOpen = 0
+watch(sidebarCollapsed, (collapsed) => {
+  if (!window.matchMedia('(max-width: 600px)').matches) return
+  if (!collapsed) {
+    scrollYBeforeSidebarOpen = window.scrollY
+  } else {
+    const y = scrollYBeforeSidebarOpen
+    nextTick(() => window.scrollTo(0, y))
+  }
 })
 
 // Clear the tag-derived prefill once the filter manager closes, so reopening

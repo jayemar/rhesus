@@ -865,6 +865,14 @@ function onLightboxKey(e: KeyboardEvent) {
 function onContentClick(e: MouseEvent) {
   const img = (e.target as HTMLElement).closest('img')
   if (img) {
+    // Some sites (Blogger's "click to enlarge" pattern, at least) wrap every
+    // inline image in <a href="{full-size-image-url}">. Without this, the
+    // lightbox still opened, but the click's native default action was left
+    // to run too - navigating the whole page to that raw image URL right
+    // out from under the lightbox, since the <a> branch below (which does
+    // call preventDefault) is never reached for a click that resolves to an
+    // <img> first.
+    e.preventDefault()
     const caption = stripHtml((img as HTMLImageElement).alt)
       || stripHtml(img.closest('figure')?.querySelector('figcaption')?.textContent?.trim() ?? '')
       || ''

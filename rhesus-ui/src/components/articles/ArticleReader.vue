@@ -1375,7 +1375,12 @@ async function toggleFullContent() {
       div.remove()
     })
 
-    const article = new Readability(doc).parse()
+    // Readability strips every class but "page" by default - mark highlight
+    // boxes with our own class first and tell it to preserve that one, or
+    // the box styling below never survives extraction.
+    markHighlightBoxes(doc)
+
+    const article = new Readability(doc, { classesToPreserve: ['rhesus-highlight-box'] }).parse()
     fullContent.value = article?.content ?? result.content
     if (meta.author || meta.publishedAt) emit('full-content-meta', meta)
   } catch {
@@ -1619,6 +1624,17 @@ function markPullQuotes(doc: Document) {
   })
 }
 
+// Vox Media's Duet CMS (The Verge, Polygon, SB Nation, Eater, etc.) boxes
+// off editorial asides - AMA plugs, related-coverage nudges - in a
+// "highlight" block that's visually set apart from the surrounding body
+// text on the original site. Left unmarked, it reads as an abrupt topic
+// change mid-article instead of a set-off aside.
+function markHighlightBoxes(doc: Document) {
+  doc.querySelectorAll('[class*="duet--article--highlight" i]').forEach((el) => {
+    el.classList.add('rhesus-highlight-box')
+  })
+}
+
 // Social embed widgets (Instagram, TikTok, Facebook, etc.) ship as an empty
 // placeholder element plus a <script> that a real browser on the origin
 // site uses to fetch and render the actual embed client-side. That script
@@ -1771,6 +1787,7 @@ function processContent(html: string): string {
     outer.replaceWith(inner)
   })
   markPullQuotes(doc)
+  markHighlightBoxes(doc)
   // Defer decoding of article images until they approach the viewport. Without
   // this the browser decodes every image in the article at once, at full
   // natural resolution regardless of the max-width: 100% it is displayed at -
@@ -2049,6 +2066,27 @@ watch(
   border-bottom: 1px solid var(--color-border);
   padding: 0.9em 0.5em;
   margin: 0 0 1.1em;
+}
+
+/* A CMS "highlight" callout is an editorial aside, not a quotation - a
+   shaded box distinguishes it from both blockquote's left border and the
+   pull quote's rule lines. */
+.reader-content :deep(.rhesus-highlight-box) {
+  padding: 0.9em 1.1em;
+  margin: 0 0 1.1em;
+  background: rgba(128, 128, 128, 0.08);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+
+.reader-content :deep(.rhesus-highlight-box h2),
+.reader-content :deep(.rhesus-highlight-box h3) {
+  margin-top: 0;
+  font-size: 1.05em;
+}
+
+.reader-content :deep(.rhesus-highlight-box p:last-child) {
+  margin-bottom: 0;
 }
 
 .reader-content :deep(.rhesus-embed-fallback) {

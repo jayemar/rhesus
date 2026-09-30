@@ -188,8 +188,31 @@ export const useArticlesStore = defineStore('articles', () => {
     }
   }
 
+  // Same as select(), but for restoring a remembered open article (see
+  // AppShell.vue's restoreOpenArticle()) after a fresh reload rather than a
+  // normal in-app selection. select() assumes the article is already in the
+  // freshly reloaded list, which normally holds since you can only select
+  // from what you're currently looking at - but this article may have
+  // opened it before the reload marked it read, which drops it right back
+  // out of a currently unread-filtered list. Fetches it directly by id and
+  // splices it in first when that happens; returns false (nothing to
+  // restore) only if even that direct fetch fails, e.g. the article was
+  // since deleted/purged.
+  async function selectRestored(id: number): Promise<boolean> {
+    if (!articles.value.some((a) => a.id === id)) {
+      try {
+        articles.value.unshift(await getArticle(id))
+      } catch (err) {
+        console.error('selectRestored: failed to fetch article', id, err)
+        return false
+      }
+    }
+    select(id)
+    return true
+  }
+
   return {
     articles, selectedId, loading, loadingMore, hasMore, currentViewMode, sortOrder, readCountDelta, starredCountDelta,
-    load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, appendNew, select, setNote, setLabels,
+    load, loadMore, fetchContent, markRead, markReadBatch, toggleStar, markAllRead, appendNew, select, selectRestored, setNote, setLabels,
   }
 })

@@ -432,6 +432,7 @@ function findTitle(items: ApiFeedTreeItem[], id: number, isCategory: boolean): s
 }
 
 // Drive feed selection and article loading from the current route.
+let restoreArticleAttempted = false
 watch(
   [() => route.name, () => route.params.id, () => route.query.viewMode, () => tree.value.length > 0],
   ([routeName, idParam, viewMode, treeReady]) => {
@@ -443,7 +444,17 @@ watch(
       id === -4 && vm === 'unread' ? 'Unread articles'
       : findTitle(tree.value, id, isCategory) ?? (isCategory ? 'Category' : 'Feed')
     feedsStore.select({ id, isCategory, title, viewMode: vm === 'all_articles' ? undefined : vm })
-    articlesStore.load(id, isCategory, vm)
+    const loadPromise = articlesStore.load(id, isCategory, vm)
+    // Only the very first load after boot is a candidate for restoring a
+    // sessionStorage-remembered open article (see restoreOpenArticle() and
+    // OPEN_ARTICLE_KEY below) - every subsequent navigation is the user
+    // actually browsing, not a post-reload restore, and by then
+    // sessionStorage no longer has anything to restore anyway (opening or
+    // closing an article always keeps it in sync).
+    if (!restoreArticleAttempted) {
+      restoreArticleAttempted = true
+      void loadPromise.then(restoreOpenArticle)
+    }
     // articlesStore.load() unconditionally resets readCountDelta (the local
     // "articles read since the last real count" compensator) on every
     // navigation, including navigating back to a view already visited this
@@ -606,7 +617,41 @@ watch(selection, (newSel) => {
   if (newSel && !settings.value.sidebar_collapsed) settings.value.sidebar_collapsed = true
 })
 
+// Persists which article is open across a full reload - notably Android
+// killing Firefox's backgrounded tab and recreating it on return from
+// another app, which loses all in-memory state (the reader overlay
+// included) and just re-boots Rhesus fresh from the current URL. The URL
+// itself deliberately never encodes the open article (see the
+// history.pushState() call below), only the selected feed/list - the route
+// watcher already re-derives that correctly on its own after a reload, so
+// this only needs to cover the one gap it doesn't: which article, if any,
+// was open on top of it. See restoreOpenArticle() below for the other half.
+const OPEN_ARTICLE_KEY = 'ttrss-open-article-id'
+
+// The other half of the restore: called once, after the first article list
+// this boot has finished loading (see the route watcher above). Opening the
+// remembered article before the reload very likely already marked it read
+// (see select() in stores/articles.ts) - which drops it right back out of a
+// currently unread-filtered reload of the same view, so this goes through
+// selectRestored() rather than select() to fetch it directly by id when
+// that happens, instead of assuming it's already in the freshly loaded
+// list. Drops the stale sessionStorage entry on any failure (deleted
+// article, expired session, etc.) rather than retrying it forever.
+async function restoreOpenArticle() {
+  const raw = sessionStorage.getItem(OPEN_ARTICLE_KEY)
+  if (!raw) return
+  const id = Number(raw)
+  if (!Number.isFinite(id) || !(await articlesStore.selectRestored(id))) {
+    sessionStorage.removeItem(OPEN_ARTICLE_KEY)
+  }
+}
+
 watch(selectedId, (newId, oldId) => {
+  if (newId !== null) {
+    sessionStorage.setItem(OPEN_ARTICLE_KEY, String(newId))
+  } else {
+    sessionStorage.removeItem(OPEN_ARTICLE_KEY)
+  }
   if (newId !== null && oldId === null) {
     history.pushState({ articleOverlay: true }, '')
     historyPushed.value = true

@@ -230,7 +230,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { VNode } from 'vue'
 import { Menu, CheckCheck, RefreshCw, Sun, Moon, Monitor, Settings, X, Rss, LogOut, Maximize2, Minimize2, Search, Filter, MoreVertical, AlarmClock, Flame } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
@@ -1318,6 +1318,15 @@ async function refresh() {
 .reader-scroll {
   --reader-h-pad: clamp(24px, 8vw, 80px);
   overflow-y: auto;
+  /* Reserve the scrollbar's space even when the content doesn't yet overflow.
+     Without this, the loading state ("Loading article...") is short enough to
+     need no scrollbar, so the content box is full width - then the fetched
+     article overflows, the scrollbar appears, and the box narrows. Everything
+     sized off that width visibly jumps: the hero image (width: 100%) shrinks
+     and .reader-toolbar's space-between icons close up. Reserving the gutter
+     keeps the width constant across the load, and avoids the full relayout
+     that width change would otherwise force. */
+  scrollbar-gutter: stable;
   height: 100%;
   padding: 24px var(--reader-h-pad);
   overscroll-behavior: contain;

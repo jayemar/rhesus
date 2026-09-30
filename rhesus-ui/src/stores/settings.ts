@@ -49,9 +49,16 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 
+  // Keep in sync with --color-bg in src/styles/variables.css.
+  const THEME_COLORS = { dark: '#1a1a1a', light: '#f5f5f5' } as const
+
   function applyTheme(theme: 'dark' | 'light' | 'system') {
     const resolved = theme === 'system' ? (systemDark.matches ? 'dark' : 'light') : theme
     document.documentElement.setAttribute('data-theme', resolved)
+    // index.html ships a static dark theme-color as the pre-JS fallback -
+    // without this, Firefox/Android keep tinting the toolbar dark even
+    // after the app resolves to light, since nothing else ever touches it.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLORS[resolved])
   }
 
   systemDark.addEventListener('change', () => {

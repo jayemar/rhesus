@@ -4,6 +4,8 @@ Rhesus is a mobile-first RSS reading SPA that replaces the TT-RSS web UI for
 day-to-day reading. It speaks directly to the native TT-RSS JSON API and is
 deployed as an additional Docker container alongside the standard TT-RSS stack.
 
+![Rhesus screenshot](screenshot.png)
+
 **Deploying Rhesus against your own TT-RSS instance?** See
 [`DEPLOYING.md`](DEPLOYING.md) for the setup steps. The rest of this document
 is architecture, not a how-to.

@@ -1379,9 +1379,35 @@ async function toggleFullContent() {
     // boxes with our own class first and tell it to preserve that one, or
     // the box styling below never survives extraction.
     markHighlightBoxes(doc)
+    restrictIframesToAllowlist(doc, result.url)
 
     const article = new Readability(doc, { classesToPreserve: ['rhesus-highlight-box'] }).parse()
-    fullContent.value = article?.content ?? result.content
+    // Readability is a content-extraction heuristic, not a sanitizer - it
+    // strips <script> but leaves things like an onerror= handler on an
+    // <img> completely untouched (confirmed directly). This was previously
+    // rendered via v-html with no sanitization at all between fetching the
+    // live page's real HTML and displaying it - DOMPurify.sanitize() below
+    // closes that, and (via IFRAME_SANITIZE_CONFIG) is what lets an
+    // already-allowlisted iframe survive this pass instead of being
+    // stripped by DOMPurify's own default no-iframes-at-all behavior.
+    //
+    // When Readability can't confidently extract an article, the fallback
+    // is deliberately the original, unmangled page (result.content) rather
+    // than doc's body - Readability mutates doc destructively as part of
+    // trying, even when it ultimately gives up, so by this point doc no
+    // longer reflects the original page. That fallback string never passed
+    // through restrictIframesToAllowlist() above (which only ran on doc),
+    // so it needs its own pass here before any iframe in it is eligible to
+    // survive DOMPurify's now-relaxed config.
+    let rawContent: string
+    if (article?.content) {
+      rawContent = article.content
+    } else {
+      const fallbackDoc = new DOMParser().parseFromString(result.content, 'text/html')
+      restrictIframesToAllowlist(fallbackDoc, result.url)
+      rawContent = fallbackDoc.body.innerHTML
+    }
+    fullContent.value = DOMPurify.sanitize(rawContent, IFRAME_SANITIZE_CONFIG)
     if (meta.author || meta.publishedAt) emit('full-content-meta', meta)
   } catch {
     emit('copied', 'Could not fetch full content')
@@ -1706,6 +1732,53 @@ function embedPlatformName(url: string): string {
   }
 }
 
+// Trusted video-embed providers whose <iframe> we let through. DOMPurify's
+// default config strips every <iframe> outright - for good reason, since an
+// arbitrary third-party iframe can host anything from a phishing page to an
+// invisible tracking frame - so carving out an exception means narrowing to
+// a short list of known, single-purpose embed origins first, checked by
+// hostname *and* the provider's own embed-path convention (an arbitrary
+// youtube.com page is not the same trust boundary as the embed player
+// itself, even though they share a host).
+const IFRAME_EMBED_ALLOWLIST: { hosts: string[], pathPrefix: string }[] = [
+  { hosts: ['youtube.com', 'www.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'], pathPrefix: '/embed/' },
+  { hosts: ['player.vimeo.com'], pathPrefix: '/video/' },
+]
+
+function isAllowedEmbedSrc(src: string, base: string): boolean {
+  try {
+    const url = new URL(src, base)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
+    return IFRAME_EMBED_ALLOWLIST.some(({ hosts, pathPrefix }) =>
+      hosts.includes(url.hostname) && url.pathname.startsWith(pathPrefix))
+  } catch {
+    return false
+  }
+}
+
+// Must run before DOMPurify.sanitize() - and before that call is given
+// ADD_TAGS: ['iframe'] to let any <iframe> at all survive - so that only
+// ones already confirmed trusted here are still present by the time that
+// exception applies. An iframe failing the allowlist is simply removed, the
+// same outcome DOMPurify's own default (no iframe support at all) already
+// produces for it today.
+function restrictIframesToAllowlist(doc: Document, base: string): void {
+  doc.querySelectorAll('iframe').forEach((el) => {
+    const src = el.getAttribute('src')
+    if (!src || !isAllowedEmbedSrc(src, base)) {
+      el.remove()
+    }
+  })
+}
+
+// Shared by both content pipelines (see processContent() and
+// toggleFullContent()) so the allowed attribute/tag set can't drift between
+// them.
+const IFRAME_SANITIZE_CONFIG = {
+  ADD_TAGS: ['iframe'],
+  ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'referrerpolicy'],
+}
+
 function processContent(html: string): string {
   // Preprocess before DOMPurify strips data-* attributes: move data-caption
   // into alt (for lightbox) and figcaption (for below-image display) when empty.
@@ -1721,6 +1794,7 @@ function processContent(html: string): string {
   decodeResidualEntities(pre.body)
   resolveRelativeUrls(pre, props.article.link ?? undefined)
   fallbackEmptyEmbeds(pre)
+  restrictIframesToAllowlist(pre, props.article.link ?? location.href)
   pre.querySelectorAll('img[data-caption]').forEach(img => {
     const dc = img.getAttribute('data-caption') ?? ''
     const dcText = stripHtml(dc)
@@ -1738,7 +1812,7 @@ function processContent(html: string): string {
       figure.appendChild(figcaption)
     }
   })
-  const sanitized = DOMPurify.sanitize(pre.body.innerHTML)
+  const sanitized = DOMPurify.sanitize(pre.body.innerHTML, IFRAME_SANITIZE_CONFIG)
   const doc = new DOMParser().parseFromString(sanitized, 'text/html')
   // A read-only sanitized article body has no legitimate use for an
   // interactive <button> - some feeds (Substack's image zoom/enlarge
@@ -2019,6 +2093,25 @@ watch(
 
 .reader-content :deep(figure img) {
   margin-bottom: 0;
+}
+
+/* YouTube/Vimeo embeds (see IFRAME_EMBED_ALLOWLIST) ship with fixed pixel
+   width/height HTML attributes (commonly 560x315) from the original page,
+   which overflow a phone-width column untouched - max-width alone doesn't
+   fix this the way it does for <img>, since an iframe has no intrinsic
+   aspect ratio of its own to scale down proportionally. Forcing the
+   standard 16:9 video aspect ratio isn't pixel-perfect for the rare
+   non-16:9 embed, but matches the vast majority of real ones closely
+   enough to be the right default here. */
+.reader-content :deep(iframe) {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  max-width: 100%;
+  border: 0;
+  border-radius: 4px;
+  margin-bottom: 1.5em;
 }
 
 .reader-content :deep(a) {

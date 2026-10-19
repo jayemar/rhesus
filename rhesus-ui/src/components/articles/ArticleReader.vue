@@ -277,10 +277,6 @@
           Font: {{ currentFont.label }}
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
-        <button class="share-option" @click="openMoreCatDropdown">
-          Category: {{ userCategories.find(c => c.id === currentCatId)?.title ?? 'Uncategorized' }}
-          <ChevronRight :size="13" class="share-option-chevron" />
-        </button>
         <button class="share-option" @click="openMoreTagsDropdown">
           Tags ({{ nonEmptyTags.length }})
           <ChevronRight :size="13" class="share-option-chevron" />
@@ -304,19 +300,7 @@
           <ChevronRight :size="13" class="share-option-chevron" />
         </button>
         <button class="share-option" @click="openFeedEditDialog">Edit feed</button>
-        <button class="share-option" :disabled="refetching" @click="refetchCurrentArticle">
-          {{ refetching ? 'Refetching...' : 'Refetch article' }}
-        </button>
-      </div>
-      <div v-if="moreCatOpen" class="font-backdrop" @click="moreCatOpen = false" />
-      <div v-if="moreCatOpen" class="font-dropdown" :style="moreCatDropdownStyle" @click.stop>
-        <button
-          v-for="cat in userCategories"
-          :key="cat.id"
-          class="font-option"
-          :class="{ active: cat.id === currentCatId }"
-          @click="selectCategory(cat.id)"
-        >{{ cat.title }}</button>
+        <button class="share-option" @click="openAddFeedDialog">Add new feed</button>
       </div>
       <div v-if="moreTagsOpen" class="font-backdrop" @click="moreTagsOpen = false" />
       <div v-if="moreTagsOpen" class="font-dropdown tags-popup" :style="moreTagsDropdownStyle" @click.stop>
@@ -419,6 +403,10 @@
         @close="showFeedEditDialog = false"
         @unsubscribed="onFeedUnsubscribed"
       />
+      <AddFeedDialog
+        v-if="showAddFeedDialog"
+        @close="showAddFeedDialog = false"
+      />
     </Teleport>
   </div>
 </template>
@@ -432,15 +420,15 @@ import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
 import { useSettingsStore } from '@/stores/settings'
-import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent, refetchArticle } from '@/api/articles'
+import { getLabels, setArticleLabel, createLabel, saveArticleNote, fetchFullContent } from '@/api/articles'
 import { snoozeArticle } from '@/api/snooze'
 import { selfDestructArticle } from '@/api/selfDestruct'
-import { editFeed } from '@/api/feeds'
 import { writeToClipboard } from '@/utils/clipboard'
 import { extractJsonLdMeta } from '@/utils/jsonld'
 import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities } from '@/utils/text'
 import { anchorPopupStyle } from '@/utils/popup'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
+import AddFeedDialog from '@/components/feeds/AddFeedDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
 
 const props = defineProps<{ article: ApiArticle, scrolled?: boolean }>()
@@ -483,50 +471,6 @@ function openMoreFontDropdown() {
 function selectReaderFont(value: string) {
   settingsStore.settings.font_family = value as typeof settingsStore.settings.font_family
   moreFontOpen.value = false
-}
-
-const moreCatOpen = ref(false)
-const moreCatDropdownStyle = ref<Record<string, string>>({})
-
-const userCategories = computed(() => {
-  const cats: { id: number; title: string }[] = [{ id: 0, title: 'Uncategorized' }]
-  for (const item of feedsStore.tree) {
-    if (item.type === 'category' && item.bare_id > 0) {
-      cats.push({ id: item.bare_id, title: item.name })
-    }
-  }
-  return cats
-})
-
-function findFeedCatId(items: typeof feedsStore.tree, feedId: number): number | undefined {
-  for (const item of items) {
-    if (item.type === 'category' && item.bare_id >= 0) {
-      if (item.items?.some(f => f.bare_id === feedId)) return item.bare_id
-      if (item.items) {
-        const found = findFeedCatId(item.items, feedId)
-        if (found !== undefined) return found
-      }
-    }
-  }
-  return undefined
-}
-
-const currentCatId = computed(() =>
-  findFeedCatId(feedsStore.tree, props.article.feed_id) ?? 0
-)
-
-function openMoreCatDropdown() {
-  showMoreMenu.value = false
-  if (moreBtn.value) {
-    moreCatDropdownStyle.value = anchorPopupStyle(moreBtn.value.getBoundingClientRect(), 200)
-  }
-  moreCatOpen.value = true
-}
-
-async function selectCategory(catId: number) {
-  moreCatOpen.value = false
-  await editFeed(props.article.feed_id, { cat_id: catId })
-  feedsStore.loadTree()
 }
 
 const moreTagsOpen = ref(false)
@@ -696,10 +640,16 @@ function confirmCustomSelfDestruct() {
 }
 
 const showFeedEditDialog = ref(false)
+const showAddFeedDialog = ref(false)
 
 function openFeedEditDialog() {
   showMoreMenu.value = false
   showFeedEditDialog.value = true
+}
+
+function openAddFeedDialog() {
+  showMoreMenu.value = false
+  showAddFeedDialog.value = true
 }
 
 function onFeedUnsubscribed() {
@@ -1254,27 +1204,6 @@ function openInNewTab() {
   if (props.article.link) window.open(props.article.link, '_blank', 'noopener,noreferrer')
 }
 
-const refetching = ref(false)
-
-async function refetchCurrentArticle() {
-  if (refetching.value) return
-  refetching.value = true
-  try {
-    const result = await refetchArticle(props.article.id)
-    if (result.changed) {
-      await articlesStore.fetchContent(props.article.id)
-      emit('copied', 'Article refetched and updated')
-    } else {
-      emit('copied', 'Article refetched - no changes found')
-    }
-  } catch (e) {
-    console.error('refetchArticle failed:', e)
-    emit('copied', 'Refetch failed - see console for details')
-  } finally {
-    refetching.value = false
-    showMoreMenu.value = false
-  }
-}
 
 const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
 

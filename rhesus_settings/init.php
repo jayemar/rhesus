@@ -702,7 +702,7 @@ class Rhesus_Settings extends Plugin {
         $html = UrlHelper::fetch(['url' => $url]);
 
         if (!$html) {
-            return [1, ["error" => "FETCH_FAILED"]];
+            return [1, ["error" => "FETCH_FAILED", "message" => truncate_string(clean(UrlHelper::$fetch_last_error), 250, '…')]];
         }
 
         return [0, ["content" => $html, "url" => $url]];

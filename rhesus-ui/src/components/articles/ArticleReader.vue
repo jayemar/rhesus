@@ -96,10 +96,6 @@
             title="More options"
             @click.stop="openMoreMenu"
           ><MoreVertical :size="16" /></button>
-          <div class="floating-toolbar-divider" />
-          <button class="tb-btn" title="Back to top" @click.stop="emit('scroll-to-top')">
-            <ChevronUp :size="16" />
-          </button>
         </div>
       </Transition>
     </Teleport>
@@ -268,6 +264,7 @@
         :style="morePopupStyle"
         @click.stop
       >
+        <button v-if="scrolled" class="share-option" @click="showMoreMenu = false; emit('scroll-to-top')">Scroll to top</button>
         <button v-if="article.link" class="share-option" @click="openInNewTab">Open in new tab</button>
         <button
           class="share-option share-option--font"
@@ -2729,13 +2726,6 @@ watch(
   border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
-
-.floating-toolbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--color-border);
-  margin: 0 4px;
 }
 
 .fade-enter-active,

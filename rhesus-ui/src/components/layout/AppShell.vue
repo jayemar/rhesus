@@ -674,6 +674,18 @@ function onPopState() {
     history.pushState({ articleOverlay: true }, '')
     return
   }
+  // Same idea as the label popup above, for the Edit feed / Add new feed
+  // dialogs opened from the article's own more menu.
+  if (articleReaderRef.value?.isFeedEditDialogOpen) {
+    articleReaderRef.value.closeFeedEditDialogForBackButton()
+    history.pushState({ articleOverlay: true }, '')
+    return
+  }
+  if (articleReaderRef.value?.isAddFeedDialogOpen) {
+    articleReaderRef.value.closeAddFeedDialogForBackButton()
+    history.pushState({ articleOverlay: true }, '')
+    return
+  }
   // The lightbox pushes its own history entry and handles this same popstate
   // itself (see ArticleReader.vue's onLightboxPopstate) - if it's still open
   // here, this pop is just closing the lightbox, not the article.

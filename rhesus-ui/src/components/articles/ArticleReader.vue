@@ -1136,6 +1136,14 @@ defineExpose({
   isLabelMenuOpen: computed(() => showLabelMenu.value),
   closeLabelMenuForBackButton: () => { showLabelMenu.value = false },
   isLightboxOpen: computed(() => lightboxSrc.value !== null),
+  // Same "absorb the back press" idea as the label popup above, for the
+  // Edit feed / Add new feed dialogs opened from this article's own more
+  // menu - these are full floating dialogs, so a back press feels like it
+  // should dismiss just the dialog, not the whole article underneath it.
+  isFeedEditDialogOpen: computed(() => showFeedEditDialog.value),
+  closeFeedEditDialogForBackButton: () => { showFeedEditDialog.value = false },
+  isAddFeedDialogOpen: computed(() => showAddFeedDialog.value),
+  closeAddFeedDialogForBackButton: () => { showAddFeedDialog.value = false },
 })
 
 function syncLabelsToStore() {

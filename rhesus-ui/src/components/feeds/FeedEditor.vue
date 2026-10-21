@@ -3,24 +3,27 @@
     <div class="feed-editor-inner">
       <div class="feed-editor-header">
         <h2>Feeds</h2>
-        <a :href="ttrssUrl" target="_blank" rel="noopener noreferrer" class="ttrss-icon-link" title="Open TT-RSS settings">
-          <ExternalLink :size="15" />
-        </a>
+        <button class="ttrss-icon-link" title="More options" @click.stop="openMoreMenu">
+          <MoreVertical :size="15" />
+        </button>
+        <span v-if="importStatus" class="opml-status" :class="importStatusClass">{{ importStatus }}</span>
       </div>
 
-      <section class="opml-section">
-        <h3>OPML</h3>
-        <div class="opml-row">
-          <a class="opml-btn" :href="opmlExportUrl" target="_blank" rel="noopener noreferrer">
-            <Download :size="14" /> Export
-          </a>
-          <label class="opml-btn opml-import-label">
-            <Upload :size="14" /> Import
-            <input type="file" accept=".opml,application/xml,text/xml" class="opml-file-input" @change="onImportFile" />
-          </label>
-          <span v-if="importStatus" class="opml-status" :class="importStatusClass">{{ importStatus }}</span>
-        </div>
-      </section>
+      <div v-if="showMoreMenu" class="share-backdrop" @click="showMoreMenu = false" />
+      <div
+        v-if="showMoreMenu"
+        class="share-popup"
+        :style="moreMenuStyle"
+        @click.stop
+      >
+        <a :href="ttrssUrl" target="_blank" rel="noopener noreferrer" class="share-option" @click="showMoreMenu = false">Open TT-RSS settings</a>
+        <a href="http://centre:8700/#bridge-CssSelectorBridge" target="_blank" rel="noopener noreferrer" class="share-option" @click="showMoreMenu = false">Open RSS-Bridge</a>
+        <a class="share-option" :href="opmlExportUrl" target="_blank" rel="noopener noreferrer" @click="showMoreMenu = false">Export OPML</a>
+        <label class="share-option opml-import-label" @click="showMoreMenu = false">
+          Import OPML
+          <input type="file" accept=".opml,application/xml,text/xml" class="opml-file-input" @change="onImportFile" />
+        </label>
+      </div>
 
       <section class="add-section">
         <h3>Add feed</h3>
@@ -204,7 +207,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Download, Upload, Plus, Pencil, Trash2, RefreshCw, X, Loader2, ChevronDown, ChevronRight, AlertCircle, StickyNote, Rss, ExternalLink } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, RefreshCw, X, Loader2, ChevronDown, ChevronRight, AlertCircle, StickyNote, Rss, MoreVertical } from 'lucide-vue-next'
+import { anchorPopupStyle } from '@/utils/popup'
 import { getAllFeeds, getAllCategories, deleteFeed, editFeed, importOpml, refreshFeed, getFeedNotes, logUnsubscribeReason } from '@/api/feeds'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import FeedPreviewDialog from '@/components/feeds/FeedPreviewDialog.vue'
@@ -215,6 +219,16 @@ import { getSid } from '@/api/client'
 import type { ApiFeed, ApiCategory } from '@/types/api'
 
 const feedsStore = useFeedsStore()
+
+const showMoreMenu = ref(false)
+const moreMenuStyle = ref<Record<string, string>>({})
+
+function openMoreMenu(event: MouseEvent) {
+  if (showMoreMenu.value) { showMoreMenu.value = false; return }
+  const btn = event.currentTarget as HTMLElement
+  moreMenuStyle.value = anchorPopupStyle(btn.getBoundingClientRect(), 220)
+  showMoreMenu.value = true
+}
 
 const ttrssUrl = computed(() => {
   const sid = getSid()
@@ -460,31 +474,6 @@ h3 {
 }
 
 /* OPML */
-.opml-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.opml-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  text-decoration: none;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.opml-btn:hover {
-  background: var(--color-surface-raised);
-}
-
 .opml-import-label {
   position: relative;
   overflow: hidden;

@@ -65,7 +65,7 @@
           <span class="brand-meta">v{{ appVersion }} &middot; {{ buildDate }}</span>
         </span>
       </a>
-      <FeedTree @navigate="settings.sidebar_collapsed = true; showFeedEditor = false; showFilterManager = false" />
+      <FeedTree @navigate="settings.sidebar_collapsed = true; closeFeedEditor(); showFilterManager = false" />
       <div class="sidebar-manage">
         <button
           class="sidebar-footer-btn"
@@ -117,9 +117,9 @@
           :class="{ 'settings-overlay--over-reader': !!selectedArticle }"
           tabindex="-1"
           @vue:mounted="focusOverlay"
-          @keydown.esc="showFeedEditor = false"
+          @keydown.esc="closeFeedEditor"
         >
-          <button class="settings-close" title="Close" @click="showFeedEditor = false"><X :size="14" /></button>
+          <button class="settings-close" title="Close" @click="closeFeedEditor"><X :size="14" /></button>
           <FeedEditor />
         </div>
       </Transition>
@@ -290,6 +290,7 @@ const filterManagerInitialFilter = ref<Partial<ApiFilter> | null>(null)
 const showArticleSearch = ref(false)
 const copyToast = ref<string | null>(null)
 const historyPushed = ref(false)
+const feedEditorHistoryPushed = ref(false)
 const sidebarCollapsed = computed(() => settings.value.sidebar_collapsed)
 const suppressNextSidebarCollapse = ref(true)
 
@@ -595,6 +596,28 @@ watch(showFilterManager, (open) => {
   if (!open) filterManagerInitialFilter.value = null
 })
 
+// Pressing back while the feed management panel is open should close just
+// that panel, not navigate away from Rhesus entirely (there was nothing
+// pushed for it before, so the browser's back button fell through to
+// whatever real history entry preceded this page). Pushes its own entry on
+// open, mirroring the article overlay below, so there's always something
+// for the back button to consume.
+watch(showFeedEditor, (isOpen, wasOpen) => {
+  if (isOpen && !wasOpen) {
+    history.pushState({ feedEditorOverlay: true }, '')
+    feedEditorHistoryPushed.value = true
+  }
+})
+
+function closeFeedEditor() {
+  if (feedEditorHistoryPushed.value) {
+    feedEditorHistoryPushed.value = false
+    history.back()
+  } else {
+    showFeedEditor.value = false
+  }
+}
+
 // Periodic polling: restart the timer whenever the interval setting changes.
 let pollTimer: ReturnType<typeof setInterval> | null = null
 watch(
@@ -666,6 +689,15 @@ watch(selectedId, (newId, oldId) => {
 })
 
 function onPopState() {
+  // The feed management panel pushed its own entry when it opened (see the
+  // showFeedEditor watcher above) - consume it here rather than falling
+  // through to the article-closing logic below, whether or not an article
+  // happens to be open underneath it.
+  if (showFeedEditor.value) {
+    feedEditorHistoryPushed.value = false
+    showFeedEditor.value = false
+    return
+  }
   // The label popup consumes a back-press to close itself rather than
   // exiting the article - re-push the article's own history entry so the
   // pop we just absorbed doesn't leave the article one back-press short.
@@ -796,20 +828,24 @@ async function logout() {
 }
 
 function toggleSettings() {
-  showFeedEditor.value = false
+  closeFeedEditor()
   showSettings.value = !showSettings.value
 }
 
 function toggleFeedEditor() {
+  if (showFeedEditor.value) {
+    closeFeedEditor()
+    return
+  }
   showSettings.value = false
   showFilterManager.value = false
-  showFeedEditor.value = !showFeedEditor.value
-  if (showFeedEditor.value) settings.value.sidebar_collapsed = true
+  showFeedEditor.value = true
+  settings.value.sidebar_collapsed = true
 }
 
 function toggleFilterManager() {
   showSettings.value = false
-  showFeedEditor.value = false
+  closeFeedEditor()
   showFilterManager.value = !showFilterManager.value
   if (showFilterManager.value) settings.value.sidebar_collapsed = true
 }
@@ -827,7 +863,7 @@ function onCreateFilterFromTags(tags: string[]) {
     rules: tags.map(tag => ({ ...blankRule(), filter_type: 7, reg_exp: `^${escapeRegExp(tag)}$` })),
   }
   showSettings.value = false
-  showFeedEditor.value = false
+  closeFeedEditor()
   showFilterManager.value = true
   settings.value.sidebar_collapsed = true
 }

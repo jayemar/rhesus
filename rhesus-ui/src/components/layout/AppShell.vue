@@ -254,6 +254,7 @@ import { browserShowsNativeToast } from '@/utils/clipboard'
 import { externalLinkDomain, originOf } from '@/utils/url'
 import { blankRule, escapeRegExp } from '@/utils/filterDefaults'
 import { anchorPopupStyle } from '@/utils/popup'
+import { formatArticleDate } from '@/utils/date'
 import type { ApiFeedTreeItem, ApiFilter, UiSettings } from '@/types/api'
 
 const appVersion = __APP_VERSION__
@@ -345,12 +346,6 @@ function onReaderScroll() {
 
 function scrollToTop() {
   readerScrollEl.value?.scrollTo({ top: 0, behavior: 'smooth' })
-}
-
-function formatArticleDate(ts: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-  }).format(new Date(ts * 1000))
 }
 
 const selectedArticle = computed(() =>
@@ -715,6 +710,11 @@ function onPopState() {
   }
   if (articleReaderRef.value?.isAddFeedDialogOpen) {
     articleReaderRef.value.closeAddFeedDialogForBackButton()
+    history.pushState({ articleOverlay: true }, '')
+    return
+  }
+  if (articleReaderRef.value?.isInfoPopupOpen) {
+    articleReaderRef.value.closeInfoPopupForBackButton()
     history.pushState({ articleOverlay: true }, '')
     return
   }

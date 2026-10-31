@@ -93,6 +93,11 @@
           ><Newspaper :size="16" /></button>
           <button
             class="tb-btn"
+            title="Article info"
+            @click.stop="showInfoPopup = true"
+          ><Info :size="16" /></button>
+          <button
+            class="tb-btn"
             title="More options"
             @click.stop="openMoreMenu"
           ><MoreVertical :size="16" /></button>
@@ -159,6 +164,28 @@
             <button class="reader-note-save" :disabled="noteSaving" @click.stop="saveNote">Save</button>
             <button class="reader-note-cancel" @click.stop="cancelNote">Cancel</button>
           </div>
+        </div>
+      </Transition>
+    </Teleport>
+    <Teleport defer to=".reader-overlay">
+      <div v-if="showInfoPopup" class="info-backdrop" @click.stop="showInfoPopup = false" />
+      <Transition name="fade">
+        <div v-if="showInfoPopup" class="floating-info" @click.stop>
+          <button class="floating-info-close" title="Close" @click.stop="showInfoPopup = false"><X :size="14" /></button>
+          <img v-if="heroUrl && !heroImageFailed" class="floating-info-thumb" :src="heroUrl" :alt="heroAlt" decoding="async" />
+          <h3 class="floating-info-title">{{ article.title }}</h3>
+          <p v-if="article.excerpt" class="floating-info-excerpt">{{ article.excerpt }}</p>
+          <dl class="floating-info-fields">
+            <template v-if="infoAuthor">
+              <dt>Author</dt><dd>{{ infoAuthor }}</dd>
+            </template>
+            <dt>Feed</dt><dd>{{ article.feed_title }}</dd>
+            <dt>Published</dt><dd>{{ formatArticleDate(article.updated) }}</dd>
+            <template v-if="infoLinkDomain">
+              <dt>Source</dt>
+              <dd><a :href="article.link" target="_blank" rel="noopener noreferrer" @click.stop>{{ infoLinkDomain }}</a></dd>
+            </template>
+          </dl>
         </div>
       </Transition>
     </Teleport>
@@ -412,7 +439,7 @@
 import { ref, computed, nextTick, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { Readability } from '@mozilla/readability'
-import { Mail, MailOpen, Star, Tag as TagIcon, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight, ImageOff } from 'lucide-vue-next'
+import { Mail, MailOpen, Star, Tag as TagIcon, Check, Plus, MoreVertical, Share2, Search, X, ChevronUp, ChevronDown, StickyNote, Newspaper, ChevronRight, ImageOff, Info } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '@/stores/articles'
 import { useFeedsStore } from '@/stores/feeds'
@@ -424,6 +451,8 @@ import { writeToClipboard } from '@/utils/clipboard'
 import { extractJsonLdMeta } from '@/utils/jsonld'
 import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities } from '@/utils/text'
 import { anchorPopupStyle } from '@/utils/popup'
+import { externalLinkDomain } from '@/utils/url'
+import { formatArticleDate } from '@/utils/date'
 import FeedEditDialog from '@/components/feeds/FeedEditDialog.vue'
 import AddFeedDialog from '@/components/feeds/AddFeedDialog.vue'
 import type { ApiArticle, ApiLabel } from '@/types/api'
@@ -884,9 +913,22 @@ const noteSaving = ref(false)
 const noteInput = ref<HTMLTextAreaElement | null>(null)
 const currentNote = ref(props.article.note ?? '')
 
+const showInfoPopup = ref(false)
+
+// Some feeds (RTE Sport, at least) put their social-media page URL in the
+// author field instead of a byline - not a person's name, so don't show it
+// as one. Same check AppShell.vue's readerAuthor applies to the header.
+const infoAuthor = computed(() => {
+  const author = props.article.author ?? ''
+  return author && !/^https?:\/\//i.test(author) ? author : ''
+})
+
+const infoLinkDomain = computed(() => externalLinkDomain(props.article.link, props.article.site_url))
+
 watch(() => props.article.id, () => {
   showNote.value = false
   currentNote.value = props.article.note ?? ''
+  showInfoPopup.value = false
 })
 
 function toggleNote() {
@@ -1141,6 +1183,8 @@ defineExpose({
   closeFeedEditDialogForBackButton: () => { showFeedEditDialog.value = false },
   isAddFeedDialogOpen: computed(() => showAddFeedDialog.value),
   closeAddFeedDialogForBackButton: () => { showAddFeedDialog.value = false },
+  isInfoPopupOpen: computed(() => showInfoPopup.value),
+  closeInfoPopupForBackButton: () => { showInfoPopup.value = false },
 })
 
 function syncLabelsToStore() {
@@ -2463,6 +2507,92 @@ watch(
   border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Catches clicks anywhere outside the info popup (including on the floating
+   toolbar) to dismiss it - sits just above the toolbar, just below the popup. */
+.info-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+}
+
+.floating-info {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90%, 420px);
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  z-index: 7;
+  padding: 16px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.floating-info-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.floating-info-close:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+}
+
+.floating-info-thumb {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.floating-info-title {
+  font-size: var(--font-size-md, 15px);
+  line-height: 1.35;
+  padding-right: 24px;
+  margin-bottom: 6px;
+}
+
+.floating-info-excerpt {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
+.floating-info-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  font-size: var(--font-size-sm);
+}
+
+.floating-info-fields dt {
+  color: var(--color-text-muted);
+}
+
+.floating-info-fields dd {
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.floating-info-fields dd a {
+  color: var(--color-accent);
 }
 
 .reader-note-input-wrap {

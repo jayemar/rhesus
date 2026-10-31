@@ -1,27 +1,8 @@
-# feedly-ui
+# rhesus-ui
 
-This template should help get you started developing with Vue 3 in Vite.
-
-## Recommended IDE Setup
-
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
-
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
+The Rhesus single-page app: Vue 3 (Composition API), Vite, TypeScript, Pinia.
+See the repo root [`README.md`](../README.md) for architecture and
+[`DEPLOYING.md`](../DEPLOYING.md) for deployment.
 
 ## Project Setup
 
@@ -29,14 +10,32 @@ See [Vite Configuration Reference](https://vite.dev/config/).
 npm install
 ```
 
-### Compile and Hot-Reload for Development
+### Dev server
 
 ```sh
 npm run dev
 ```
 
-### Type-Check, Compile and Minify for Production
+`vite.config.ts` proxies `/tt-rss` to the bare TT-RSS web port
+(`http://localhost:8280`), so the API works unchanged against the dev server.
+
+### Type-check and build for production
 
 ```sh
 npm run build
 ```
+
+The output in `dist/` is what `rhesus-server/Dockerfile` packages.
+
+### End-to-end tests
+
+```sh
+npm run test:e2e
+```
+
+Playwright tests log in with the credentials in `.env.playwright`.
+
+## Recommended IDE Setup
+
+[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+`vue-tsc` replaces `tsc` for type-checking `.vue` imports.

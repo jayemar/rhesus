@@ -11,8 +11,9 @@ deployed as an additional Docker container alongside the standard TT-RSS stack.
 is architecture, not a how-to.
 
 **Repo layout:** this repo (`rhesus-ui/`, `rhesus_settings/`, `rhesus-server/`,
-`rhesus-share/`) is checked out separately from the homelab repo that runs the
-actual TT-RSS/Docker stack (default path `/home/jayemar/projects/rhesus`).
+`rhesus-share/`, `feed_subscription_log/`), checked out at
+`/home/jayemar/projects/rhesus`, is separate from the homelab repo that runs
+the actual TT-RSS/Docker stack (`/home/jayemar/projects/homelab/ttrss`).
 The homelab repo's `plugins.conf` references this checkout's `rhesus_settings/`
 directory by absolute path so `manage-plugins.sh` can deploy it; it doesn't
 vendor any Rhesus source itself. `rhesus-server` is decoupled entirely - see
@@ -58,6 +59,11 @@ rhesus-ui/src/
     feeds.ts          -- getFeedTree, getCounters
     auth.ts           -- login, logout
     settings.ts       -- getUiSettings, setUiSettings (custom API methods)
+    filters.ts        -- getFilters, saveFilter, deleteFilter, setFilterEnabled
+    snooze.ts         -- optional snooze_articles plugin API
+    selfDestruct.ts   -- optional self_destruct_articles plugin API
+  composables/
+    useAddFeed.ts     -- shared subscribe/preview flow
   stores/
     auth.ts           -- session ID, login state
     feeds.ts          -- feed tree, selected feed
@@ -65,19 +71,28 @@ rhesus-ui/src/
     settings.ts       -- user preferences; debounced auto-save; font/theme application
   components/
     LoginPage.vue
+    ConfirmDialog.vue
+    SettingsPanel.vue
     layout/
       AppShell.vue    -- sidebar + article list + reader pane; keyboard nav
-      Sidebar.vue     -- feed tree with unread counts
     articles/
       ArticleList.vue -- virtualised scroll; IntersectionObserver for mark-on-scroll
       ArticleCard.vue -- thumbnail, badges, swipe gestures
       ArticleReader.vue
-    SettingsPanel.vue
-  router/index.ts     -- /login, /, /article/:id, /settings
+      SnoozedArticlesPanel.vue
+      SelfDestructPanel.vue
+    feeds/
+      FeedTree.vue, FeedItem.vue -- feed tree with unread counts
+      FeedEditor.vue  -- Feed Management
+      FeedEditDialog.vue, AddFeedDialog.vue, FeedPreviewDialog.vue
+    filters/
+      FilterManager.vue, FilterEditor.vue
+  router/index.ts     -- /login, /, /feed/:id, /category/:id, /settings
   styles/
     variables.css     -- CSS custom properties (colours, spacing, typography)
-    global.css
+    base.css
   types/api.ts        -- TypeScript interfaces matching TT-RSS JSON API shapes
+  utils/              -- clipboard, date, url, text, jsonld, popup, filterDefaults
 ```
 
 **Key design choices:**
@@ -101,7 +116,7 @@ rhesus-ui/src/
 
 ### 2. `rhesus_settings` TT-RSS Plugin (`rhesus_settings/init.php`)
 
-A system plugin that extends TT-RSS in two ways:
+A system plugin that extends TT-RSS with custom API methods and hooks.
 
 **Custom API methods** (`getUiSettings` / `setUiSettings`)
 
@@ -114,8 +129,28 @@ stored blobs gain new defaults automatically.
 Settings stored:
   theme, sort_order, sidebar_collapsed, show_thumbnails, show_excerpt,
   excerpt_lines, mark_on_scroll, swipe_right_action, swipe_left_action,
-  font_size, font_family
+  long_press_title, font_size, font_family, date_sort, load_on_startup,
+  poll_interval
 ```
+
+**Other custom API methods**
+
+```
+Labels:        createLabel, deleteLabel
+Filters:       getFilters, saveFilter, deleteFilter, setFilterEnabled
+Feeds:         editFeed, getFeedNotes, getFeedSiteUrls, removeFeedIcon,
+               fetchIconFromUrl, importOpml, resolveSubscribeUrl, previewFeed
+Content:       fetchFullContent, refetchArticle
+Counts:        getStarredCount, getLabelCounts, getAllArticlesCount
+```
+
+**Other hooks**
+
+- `HOOK_RENDER_ARTICLE_API` -- adds `date_entered` to every article/headline
+  response and repairs markup that libxml would otherwise mangle in
+  `DiskCache::rewrite_urls()`.
+- `HOOK_FEED_FETCHED` -- turns HTML responses (bot-protection challenges, error
+  pages) into empty feed data so Rhesus can show a readable error.
 
 **Custom sort hook** (`HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE`)
 
@@ -125,11 +160,12 @@ The hook intercepts this key and returns the SQL clause
 defaults to ASC, and TT-RSS's DISTINCT ON logic strips "desc" but not "asc",
 which would produce invalid SQL).
 
-**Deployment:** the plugin lives in `rhesus_settings/` in this repo and is
+**Deployment (homelab):** the plugin lives in `rhesus_settings/` in this repo and is
 deployed into the homelab stack's `app`, `updater`, and `web-nginx` containers
 via that repo's `manage-plugins.sh` (a tar-copy install, not a live
 bind-mount - edits here need a `./manage-plugins.sh --update` run in the
-homelab repo to take effect). It's enabled via the `TTRSS_PLUGINS`
+homelab repo to take effect; see `DEPLOYING.md` for the simpler bind-mount
+alternative). It's enabled via the `TTRSS_PLUGINS`
 environment variable in the homelab repo's `docker-compose.yaml`, and this
 plugin's path is listed in that repo's `plugins.conf` so `manage-plugins.sh`
 can find it.
@@ -259,7 +295,8 @@ relative `/tt-rss/` paths served via the rhesus-server nginx proxy.
 
 | Plugin | Role |
 |--------|------|
-| `rhesus_settings` | Custom API methods + starred sort hook |
+| `rhesus_settings` | Custom API methods, starred sort hook, API render/fetch hooks |
+| `feed_subscription_log` | Logs feed subscribe/unsubscribe events (Preferences tab, export, RSS feed) |
 | `af_enhance_content` | OG metadata extraction, srcset resolution, lazy-load fix, markup repair, content backfill |
 | `af_filter_enclosures` | Respects `always_display_enclosures` in API responses |
 | `af_feed_advisor` | Recommends per-feed enclosure display settings |

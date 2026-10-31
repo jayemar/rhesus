@@ -361,7 +361,7 @@
         </template>
       </div>
       <div v-if="snoozeOpen" class="font-backdrop" @click="snoozeOpen = false" />
-      <div v-if="snoozeOpen" class="font-dropdown tags-popup" :style="snoozeDropdownStyle" @click.stop>
+      <div v-if="snoozeOpen" class="font-dropdown tags-popup snooze-popup" :style="snoozeDropdownStyle" @click.stop>
         <div class="tags-popup-heading">Snooze until</div>
         <button
           v-for="preset in snoozePresets"
@@ -530,49 +530,46 @@ const snoozeDropdownStyle = ref<Record<string, string>>({})
 const snoozeCustomValue = ref('')
 const snoozing = ref(false)
 
-// Quick presets, computed fresh each time the menu opens (not reactive
-// refs) so "Later today" etc. always reflect the current moment rather
-// than when the component first mounted.
-const snoozePresets = [
-  { label: 'Later today (+4h)', until: () => { const d = new Date(); d.setHours(d.getHours() + 4); return d } },
-  { label: 'This evening', until: () => {
-      const d = new Date()
-      d.setHours(18, 0, 0, 0)
-      if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1)
-      return d
-    } },
-  { label: 'Tomorrow morning', until: () => {
-      const d = new Date()
-      d.setDate(d.getDate() + 1)
-      d.setHours(6, 0, 0, 0)
-      return d
-    } },
-  { label: 'Next week', until: () => { const d = new Date(); d.setDate(d.getDate() + 7); return d } },
-  { label: 'Next month', until: () => { const d = new Date(); d.setMonth(d.getMonth() + 1); return d } },
-]
-
-function formatCompactTime(date: Date): string {
-  let h = date.getHours()
-  const m = date.getMinutes()
-  const period = h >= 12 ? 'pm' : 'am'
-  h = h % 12
-  if (h === 0) h = 12
-  return m === 0 ? `${h}${period}` : `${h}:${String(m).padStart(2, '0')}${period}`
+// 12:01am local time, so a snoozed article is waiting at the start of the
+// day. Each helper builds from the current date.
+function daysFromToday(days: number): Date {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, 0, 1, 0, 0)
 }
 
-// "Later today (+4h)" already spells out its own offset in the label, so it
-// gets no extra hint. The rest get a short parenthetical: just a time for
-// anything today/tomorrow (the label already says which), a short date
-// otherwise - kept terse since the dropdown can't scroll horizontally.
-function presetHint(preset: { label: string; until: () => Date }): string {
-  if (preset.label.includes('(')) return ''
-  const date = preset.until()
+// Same day-of-month N months out, clamped to that month's last day (Jan 31
+// + 1 month is Feb 28/29, not Mar 3).
+function monthsFromToday(months: number): Date {
   const now = new Date()
-  const dayDiff = Math.round(
-    (new Date(date.toDateString()).getTime() - new Date(now.toDateString()).getTime()) / 86400000
-  )
-  if (dayDiff <= 1) return formatCompactTime(date)
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + months + 1, 0).getDate()
+  return new Date(now.getFullYear(), now.getMonth() + months, Math.min(now.getDate(), lastDay), 0, 1, 0, 0)
+}
+
+// Quick presets, computed fresh each time the menu opens (not reactive
+// refs) so they always reflect the current date rather than when the
+// component first mounted.
+const snoozePresets = [
+  { label: 'Tomorrow', until: () => daysFromToday(1) },
+  // The coming Monday; a full week out if today is already Monday
+  { label: 'Next week', until: () => daysFromToday((8 - new Date().getDay()) % 7 || 7) },
+  { label: 'One week', until: () => daysFromToday(7) },
+  { label: 'Next month', until: () => {
+      const now = new Date()
+      return new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 1, 0, 0)
+    } },
+  { label: 'One month', until: () => monthsFromToday(1) },
+  { label: 'One year', until: () => monthsFromToday(12) },
+]
+
+// Every preset lands at 12:01am, so the hint is just a short date, with the
+// year only when it isn't this one - kept terse since the dropdown can't
+// scroll horizontally.
+function presetHint(preset: { label: string; until: () => Date }): string {
+  const date = preset.until()
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return date.toLocaleDateString([], sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function openMoreSnoozeDropdown() {
@@ -2820,6 +2817,12 @@ watch(
 .tag-filter-create-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Tall enough for every preset plus the custom row without scrolling;
+   still capped to the viewport so it can't run off a short screen. */
+.snooze-popup {
+  max-height: calc(100vh - 16px);
 }
 
 .snooze-preset-hint {

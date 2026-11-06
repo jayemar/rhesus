@@ -97,4 +97,18 @@ final class SaveFeedIconTest extends TestCase
         $this->assertTrue($feed->favicon_is_custom);
         $this->assertNull($feed->favicon_avg_color);
     }
+
+    // saveFeedIcon() also copies the icon into the database backup table;
+    // the bootstrap's Db::pdo() always throws, which stands in for that
+    // backup failing. Setting the icon itself must still succeed.
+    public function testSaveFeedIconSucceedsWhenTheDatabaseBackupFails(): void
+    {
+        $feed = $this->seedFeed(1, ['feed_url' => 'https://example.com/feed']);
+
+        $result = Rhesus_Settings::saveFeedIcon($feed, PNG_1PX);
+
+        $this->assertNull($result['error']);
+        $this->assertSame(PNG_1PX, DiskCache::instance('feed-icons')->get('1'));
+        $this->assertTrue($feed->favicon_is_custom);
+    }
 }

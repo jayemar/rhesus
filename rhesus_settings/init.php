@@ -38,6 +38,7 @@ class Rhesus_Settings extends Plugin {
         $host->add_hook(PluginHost::HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE, $this);
         $host->add_hook(PluginHost::HOOK_FEED_FETCHED, $this);
         $host->add_hook(PluginHost::HOOK_RENDER_ARTICLE_API, $this);
+        $host->add_hook(PluginHost::HOOK_HOUSE_KEEPING, $this);
     }
 
     // TT-RSS's JSON API never returns date_entered (the column headline
@@ -550,6 +551,8 @@ class Rhesus_Settings extends Plugin {
         ]);
         $feed->save();
 
+        self::forgetFeedIcon((int)$uid, $feed_id);
+
         return [0, ["status" => "OK"]];
     }
 
@@ -602,7 +605,175 @@ class Rhesus_Settings extends Plugin {
         ]);
         $feed->save();
 
+        self::backupFeedIcon($feed, $content);
+
         return ["error" => null];
+    }
+
+    // Custom feed icons otherwise exist only as files in the app volume's
+    // feed-icons cache, named by feed id - lost with that volume (which
+    // sync-disks doesn't copy), and on unsubscribe (Pref_Feeds deletes the
+    // file, and a resubscribed feed gets a new id regardless). So keep a copy
+    // of each in the database, keyed by feed URL: it's included in database
+    // dumps, and hook_house_keeping() puts it back when the same URL is
+    // subscribed again or the file goes missing.
+    private static bool $icon_backup_schema_ready = false;
+
+    private static function ensureIconBackupSchema(): void {
+        if (self::$icon_backup_schema_ready) return;
+        Db::pdo()->exec("
+            CREATE TABLE IF NOT EXISTS ttrss_plugin_rhesus_feed_icons (
+                owner_uid INTEGER NOT NULL REFERENCES ttrss_users(id) ON DELETE CASCADE,
+                feed_url TEXT NOT NULL,
+                feed_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                sha1 CHAR(40) NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                restored_at TIMESTAMP,
+                PRIMARY KEY (owner_uid, feed_url)
+            )
+        ");
+        self::$icon_backup_schema_ready = true;
+    }
+
+    // Records $content as $feed's backed-up custom icon. Never throws - a
+    // failed backup mustn't fail setting the icon itself.
+    public static function backupFeedIcon($feed, string $content): void {
+        try {
+            self::ensureIconBackupSchema();
+            $pdo = Db::pdo();
+            $pdo->beginTransaction();
+            // A feed whose URL has been edited leaves its row under the old URL
+            $pdo->prepare("DELETE FROM ttrss_plugin_rhesus_feed_icons
+                WHERE owner_uid = ? AND feed_id = ? AND feed_url <> ?")
+                ->execute([$feed->owner_uid, $feed->id, $feed->feed_url]);
+            $pdo->prepare("INSERT INTO ttrss_plugin_rhesus_feed_icons (owner_uid, feed_url, feed_id, content, sha1)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (owner_uid, feed_url) DO UPDATE SET
+                    feed_id = EXCLUDED.feed_id, content = EXCLUDED.content, sha1 = EXCLUDED.sha1,
+                    updated_at = CURRENT_TIMESTAMP, restored_at = NULL")
+                ->execute([$feed->owner_uid, $feed->feed_url, $feed->id, base64_encode($content), sha1($content)]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            Debug::log("Rhesus_Settings: could not back up icon for feed {$feed->id}: " . $e->getMessage());
+        }
+    }
+
+    // Drops a feed's backed-up icon after the user resets it to the default,
+    // so it isn't restored later. Never throws, same as backupFeedIcon().
+    public static function forgetFeedIcon(int $owner_uid, int $feed_id): void {
+        try {
+            self::ensureIconBackupSchema();
+            Db::pdo()->prepare("DELETE FROM ttrss_plugin_rhesus_feed_icons WHERE owner_uid = ? AND feed_id = ?")
+                ->execute([$owner_uid, $feed_id]);
+        } catch (Throwable $e) {
+            Debug::log("Rhesus_Settings: could not forget icon for feed $feed_id: " . $e->getMessage());
+        }
+    }
+
+    // Runs in the updater (task 0, after each batch), never mid-update of a
+    // single feed - see restoreFeedIcon() for why that matters.
+    public function hook_house_keeping() {
+        try {
+            $this->syncFeedIconBackups();
+        } catch (Throwable $e) {
+            Debug::log("Rhesus_Settings: feed icon backup sync failed: " . $e->getMessage());
+        }
+    }
+
+    private function syncFeedIconBackups(): void {
+        self::ensureIconBackupSchema();
+        $pdo = Db::pdo();
+        $cache = DiskCache::instance('feed-icons');
+
+        // Custom icons with no backup yet, or a different one: set through
+        // TT-RSS's own UI (which never calls this plugin), or already custom
+        // before backups existed.
+        $rows = $pdo->query("SELECT f.id, f.owner_uid, f.feed_url, b.sha1,
+                b.restored_at > NOW() - INTERVAL '1 hour' AS recently_restored
+            FROM ttrss_feeds f
+            LEFT JOIN ttrss_plugin_rhesus_feed_icons b
+                ON b.owner_uid = f.owner_uid AND b.feed_url = f.feed_url
+            WHERE f.favicon_is_custom")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $content = $cache->exists((string)$row['id']) ? $cache->get((string)$row['id']) : null;
+            if (!$content || $row['sha1'] === sha1($content)) continue;
+            // A feed update that loaded its row just before restoreFeedIcon()
+            // still sees it as non-custom and downloads the site's favicon over
+            // the restored file. Put the backup back rather than backing up
+            // the wrong image.
+            if ($row['recently_restored']) {
+                $this->restoreFeedIcon((int)$row['id'], (int)$row['owner_uid'], $row['feed_url']);
+                continue;
+            }
+            self::backupFeedIcon((object)$row, $content);
+        }
+
+        $rows = $pdo->query("SELECT f.id, f.owner_uid, f.feed_url, f.favicon_is_custom,
+                b.feed_id AS backup_feed_id,
+                EXISTS (SELECT 1 FROM ttrss_feeds o WHERE o.id = b.feed_id) AS backup_feed_exists
+            FROM ttrss_plugin_rhesus_feed_icons b
+            JOIN ttrss_feeds f ON f.owner_uid = b.owner_uid AND f.feed_url = b.feed_url")
+            ->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $id = (int)$row['id'];
+            if ($row['favicon_is_custom']) {
+                // Still flagged custom but the file is gone: the app volume
+                // was lost, or the database restored from a dump.
+                if (!$cache->exists((string)$id)) {
+                    $this->restoreFeedIcon($id, (int)$row['owner_uid'], $row['feed_url']);
+                }
+            } else if ((int)$row['backup_feed_id'] === $id) {
+                // Same feed, no longer custom: reset to the default outside
+                // Rhesus (Rhesus's own reset already forgets it).
+                self::forgetFeedIcon((int)$row['owner_uid'], $id);
+            } else if (!$row['backup_feed_exists']) {
+                // The feed it was backed up from is gone and this URL has been
+                // subscribed again. (If that feed still exists, this is a
+                // deliberate second subscription - leave it alone.)
+                $this->restoreFeedIcon($id, (int)$row['owner_uid'], $row['feed_url']);
+            }
+        }
+    }
+
+    // Writes a feed's backed-up icon back and marks it custom. Skipped while
+    // the feed is being updated: update_rss_feed() loads the feed's row once,
+    // up front, and refreshes the favicon later in the same run unless that
+    // row says custom - so restoring mid-update would just get overwritten.
+    // Batch updates mark last_update_started before loading, which the
+    // FOR UPDATE check below sees; a skipped feed is retried next pass.
+    private function restoreFeedIcon(int $feed_id, int $owner_uid, string $feed_url): void {
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            $sth = $pdo->prepare("SELECT 1 FROM ttrss_feeds WHERE id = ?
+                AND NOT (last_update_started > COALESCE(last_updated, '1970-01-01')
+                    AND last_update_started > NOW() - INTERVAL '10 minute')
+                FOR UPDATE");
+            $sth->execute([$feed_id]);
+            if (!$sth->fetchColumn()) {
+                $pdo->rollBack();
+                return;
+            }
+            $sth = $pdo->prepare("SELECT content FROM ttrss_plugin_rhesus_feed_icons WHERE owner_uid = ? AND feed_url = ?");
+            $sth->execute([$owner_uid, $feed_url]);
+            $content = base64_decode((string)$sth->fetchColumn(), true);
+            if (!$content || !DiskCache::instance('feed-icons')->put((string)$feed_id, $content)) {
+                $pdo->rollBack();
+                return;
+            }
+            $pdo->prepare("UPDATE ttrss_feeds SET favicon_is_custom = true, favicon_avg_color = NULL WHERE id = ?")
+                ->execute([$feed_id]);
+            $pdo->prepare("UPDATE ttrss_plugin_rhesus_feed_icons SET feed_id = ?, restored_at = NOW()
+                WHERE owner_uid = ? AND feed_url = ?")
+                ->execute([$feed_id, $owner_uid, $feed_url]);
+            $pdo->commit();
+            Debug::log("Rhesus_Settings: restored custom icon for feed $feed_id");
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
     }
 
     // Fetches an image from a URL server-side and sets it as a feed's icon -

@@ -19,6 +19,7 @@ class PluginHost
     const HOOK_HEADLINES_CUSTOM_SORT_OVERRIDE = 1;
     const HOOK_FEED_FETCHED = 2;
     const HOOK_RENDER_ARTICLE_API = 3;
+    const HOOK_HOUSE_KEEPING = 4;
 
     public function add_hook($hook, $plugin, $priority = 10) { return true; }
     public function add_api_method($method, $plugin) { return true; }

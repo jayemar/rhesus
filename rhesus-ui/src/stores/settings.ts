@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { getUiSettings, setUiSettings } from '@/api/settings'
+import { ApiError } from '@/api/client'
 import { isSnoozeAvailable } from '@/api/snooze'
 import { isSelfDestructAvailable } from '@/api/selfDestruct'
 import { DEFAULT_SETTINGS, type UiSettings } from '@/types/api'
@@ -20,15 +21,29 @@ export const useSettingsStore = defineStore('settings', () => {
     lora: "'Lora', serif",
   }
 
-  async function load() {
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+  async function load(attempt = 0) {
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     try {
       const res = await getUiSettings()
       settings.value = { ...DEFAULT_SETTINGS, ...res.settings }
       username.value = res.user_name
-    } catch {
-      settings.value = { ...DEFAULT_SETTINGS }
+      loaded.value = true
+    } catch (e) {
+      // Keep running on whatever's in memory (defaults on first load) so the
+      // app stays usable, but leave `loaded` false: the auto-save watcher
+      // sends the whole settings object, so arming it here would write these
+      // defaults over the user's real stored settings on the first change.
+      // NOT_LOGGED_IN sends the user to the login page instead, and AppShell
+      // calls load() again when it remounts after they sign back in.
+      if (!(e instanceof ApiError && e.code === 'NOT_LOGGED_IN')) {
+        retryTimer = setTimeout(() => load(attempt + 1), Math.min(30_000, 1000 * 2 ** attempt))
+      }
     }
-    loaded.value = true
     applyTheme(settings.value.theme)
     applyFont(settings.value.font_size, settings.value.font_family)
   }
@@ -42,6 +57,9 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function save() {
+    // Same reasoning as load()'s catch: never persist settings that weren't
+    // loaded from the server first.
+    if (!loaded.value) return
     await setUiSettings(settings.value)
     applyTheme(settings.value.theme)
     applyFont(settings.value.font_size, settings.value.font_family)

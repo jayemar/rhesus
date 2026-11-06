@@ -54,25 +54,25 @@ test('label icon remains active after article is closed and reopened', async ({ 
 
   // Open label menu and wait for labels to load
   await tagBtn.click()
-  await expect(page.locator('.tag-popup')).toBeVisible()
-  await expect(page.locator('.tag-status')).not.toBeVisible({ timeout: 5000 })
+  await expect(page.locator('.label-popup')).toBeVisible()
+  await expect(page.locator('.label-status')).not.toBeVisible({ timeout: 5000 })
 
   // If no labels exist, create a temporary one
   const testLabelName = '__pw_test_label__'
   let createdLabel = false
-  if (await page.locator('.tag-option').count() === 0) {
-    await page.locator('.tag-new-input').fill(testLabelName)
-    await page.locator('.tag-new-btn').click()
-    await expect(page.locator('.tag-option').filter({ hasText: testLabelName })).toBeVisible({ timeout: 5000 })
+  if (await page.locator('.label-option').count() === 0) {
+    await page.locator('.label-new-input').fill(testLabelName)
+    await page.locator('.label-new-btn').click()
+    await expect(page.locator('.label-option').filter({ hasText: testLabelName })).toBeVisible({ timeout: 5000 })
     createdLabel = true
   }
 
   // Assign the first label if it is not already checked
-  const firstLabel = page.locator('.tag-option').first()
-  const wasChecked = await firstLabel.locator('.tag-check').isVisible()
+  const firstLabel = page.locator('.label-option').first()
+  const wasChecked = await firstLabel.locator('.label-check').isVisible()
   if (!wasChecked) {
     await firstLabel.click()
-    await expect(firstLabel.locator('.tag-check')).toBeVisible({ timeout: 3000 })
+    await expect(firstLabel.locator('.label-check')).toBeVisible({ timeout: 3000 })
   }
 
   // Verify label icon is active before close
@@ -80,7 +80,7 @@ test('label icon remains active after article is closed and reopened', async ({ 
 
   // Close the tag popup via backdrop (dispatch JS click to bypass popup z-index interception)
   await page.evaluate(() => (document.querySelector('.share-backdrop') as HTMLElement)?.click())
-  await expect(page.locator('.tag-popup')).not.toBeVisible()
+  await expect(page.locator('.label-popup')).not.toBeVisible()
   await page.locator('.reader-close').click()
   await expect(page.locator('.reader-overlay')).not.toBeVisible()
   await page.locator('.card').first().click()
@@ -92,11 +92,11 @@ test('label icon remains active after article is closed and reopened', async ({ 
   // Cleanup: uncheck the label if we assigned it, then delete it if we created it
   if (!wasChecked || createdLabel) {
     await page.locator('[title="Labels"]').click()
-    await expect(page.locator('.tag-popup')).toBeVisible()
-    await expect(page.locator('.tag-status')).not.toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.label-popup')).toBeVisible()
+    await expect(page.locator('.label-status')).not.toBeVisible({ timeout: 5000 })
     const labelToUncheck = createdLabel
-      ? page.locator('.tag-option').filter({ hasText: testLabelName })
-      : page.locator('.tag-option').first()
+      ? page.locator('.label-option').filter({ hasText: testLabelName })
+      : page.locator('.label-option').first()
     await labelToUncheck.click()
   }
 })
@@ -152,7 +152,7 @@ test('note editor save button has dark text in dark mode', async ({ page }) => {
   await expect(page.locator('.reader-overlay')).toBeVisible({ timeout: 10000 })
 
   await page.locator('.note-btn').click()
-  await expect(page.locator('.reader-note')).toBeVisible()
+  await expect(page.locator('.floating-note')).toBeVisible()
 
   await expect(page.locator('.reader-note-save')).toHaveCSS('color', 'rgb(26, 26, 26)')
 })
@@ -190,7 +190,7 @@ test('opening the note editor does not scroll the reader while scrolled into the
   // no focus() call anywhere in toggleNote() at all; a raw .click() didn't.
   const noteBtn = page.locator('footer.reader-toolbar .note-btn')
   await noteBtn.evaluate((el) => (el as HTMLElement).click())
-  await expect(page.locator('.reader-note')).toBeVisible()
+  await expect(page.locator('.floating-note')).toBeVisible()
 
   // Give any scroll animation time to actually happen before checking.
   await page.waitForTimeout(600)

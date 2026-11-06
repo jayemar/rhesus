@@ -1307,8 +1307,28 @@ async function toggleFullContent() {
     const base = doc.createElement('base')
     base.setAttribute('href', result.url)
     doc.head.appendChild(base)
+    // Drop caps (Jacobin: <p><span class="po-bo__dropcaps">B</span>y the...)
+    // are the paragraph's own first letter, not UI - unwrap them to plain
+    // text so the sweep below doesn't delete it.
+    doc.querySelectorAll('p > b[class]:first-child, p > span[class]:first-child').forEach(el => {
+      const text = el.textContent ?? ''
+      if (/^\p{L}$/u.test(text.trim()) || /drop-?caps?/i.test(el.className)) el.replaceWith(text)
+    })
     // Remove site-specific UI control elements hidden by the original page's CSS/JS
     doc.querySelectorAll('b[class], span[class]').forEach(el => el.remove())
+
+    // Readability discards anything whose class/id contains "header" as page
+    // chrome, which also takes out in-article section headings wrapped that
+    // way (Jacobin: <header class="po-bo__header"><h2>...</h2></header>).
+    // Unwrap when the heading is the wrapper's only child and body text
+    // follows - the site's own masthead has neither.
+    doc.querySelectorAll('h2, h3, h4').forEach(heading => {
+      const wrapper = heading.parentElement
+      if (!wrapper || wrapper.children.length !== 1) return
+      if (!/header/i.test(`${wrapper.className} ${wrapper.id}`)) return
+      if (!wrapper.nextElementSibling?.querySelector('p')) return
+      wrapper.replaceWith(heading)
+    })
 
     // Normalize image+caption div pairs to semantic <figure>/<figcaption> so
     // that sites like NPR (which don't use <figure>) get caption styling.

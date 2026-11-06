@@ -108,12 +108,15 @@ class Rhesus_Settings extends Plugin {
         // (e.g. <link rel="stylesheet"> or <meta charset="utf-8"> embedded in feed content).
         // Matching on \s ensures the tag has attributes, which distinguishes HTML <link rel=...>
         // from the RSS channel <link>https://...</link> (no attributes, won't match).
-        // The [^\/] before > ensures already-self-closed tags are left alone.
+        // The [^\/] before > ensures already-self-closed tags are left alone, and
+        // the lookahead skips tags that are explicitly closed - Atom writes
+        // <link href="..." rel="alternate"></link>, which is valid XML as-is but
+        // would become <link .../> plus an orphan </link> (error 76) if closed here.
         $voids = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
                   'link', 'meta', 'param', 'source', 'track', 'wbr'];
         foreach ($voids as $tag) {
             $feed_data = preg_replace(
-                '/<' . $tag . '(\s[^>]*[^\/])>/i',
+                '/<' . $tag . '(\s[^>]*[^\/])>(?!\s*<\/' . $tag . '\s*>)/i',
                 '<' . $tag . '$1/>',
                 $feed_data
             );

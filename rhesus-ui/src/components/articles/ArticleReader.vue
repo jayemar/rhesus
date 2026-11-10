@@ -995,6 +995,7 @@ function toggleSearch() {
 function closeSearch() {
   showSearch.value = false
   clearHighlights()
+  if (contentEl.value) contentEl.value.style.paddingBottom = ''
   searchQuery.value = ''
   matchCount.value = 0
   currentMatchIndex.value = 0
@@ -1072,7 +1073,38 @@ function doSearch() {
 
 function scrollToMatch(idx: number) {
   highlights.forEach((m, i) => m.classList.toggle('sh-active', i === idx))
-  highlights[idx]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const mark = highlights[idx]
+  if (mark) centerInScroller(mark)
+}
+
+// Scrolls only the reader's own scroll container. scrollIntoView() scrolls
+// every scrollable ancestor - including overflow:hidden ones, which scripts
+// can still scroll - so a match near the end of the article, which the
+// reader can't scroll far enough to center, had the browser scroll the
+// layout around the overlay instead, shifting the reader up to reveal the
+// article list (and marking list items read when mark-on-scroll is on).
+function centerInScroller(el: HTMLElement) {
+  let scroller = el.parentElement
+  while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+    scroller = scroller.parentElement
+  }
+  if (!scroller) return
+  const elRect = el.getBoundingClientRect()
+  const scrollerRect = scroller.getBoundingClientRect()
+  // On mobile the search input has raised the keyboard, so center within
+  // the part of the scroller still visible above it.
+  const vv = window.visualViewport
+  const visibleBottom = Math.min(scrollerRect.bottom, vv ? vv.offsetTop + vv.height : Infinity)
+  const visibleHeight = Math.max(visibleBottom - scrollerRect.top, elRect.height)
+  // A match in the article's last lines would stay under the keyboard even
+  // at maximum scroll - pad the end by the keyboard's height so it can rise
+  // above it. Removed again in closeSearch().
+  if (contentEl.value) {
+    const covered = scrollerRect.bottom - visibleBottom
+    contentEl.value.style.paddingBottom = covered > 0 ? `${covered}px` : ''
+  }
+  const top = scroller.scrollTop + elRect.top - scrollerRect.top - (visibleHeight - elRect.height) / 2
+  scroller.scrollTo({ top, behavior: 'smooth' })
 }
 
 function nextMatch() {

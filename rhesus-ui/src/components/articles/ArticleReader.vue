@@ -1848,6 +1848,17 @@ function processContent(html: string): string {
   // non-dangerous HTML, so they survive sanitization and render as inert
   // icon clutter unless removed here.
   doc.querySelectorAll('button').forEach(el => el.remove())
+  // Line breaks with nothing after them but whitespace or a closing bracket
+  // before the paragraph ends only add blank lines - NPR's image credits come
+  // as "(Image credit: Name<br/><br/>)", which rendered as three lines with
+  // the ")" alone on the last.
+  doc.querySelectorAll('p br, figcaption br').forEach(br => {
+    let n = br.nextSibling
+    while (n && (n.nodeName === 'BR' || (n.nodeType === Node.TEXT_NODE && /^[\s)\]]*$/.test(n.textContent ?? '')))) {
+      n = n.nextSibling
+    }
+    if (!n) br.remove()
+  })
   // A blockquote can end up with no real content for reasons outside our
   // control (Readability stripping a div-wrapped quote it judged "shady",
   // a malformed feed, etc.) - the CSS below still borders/backgrounds it

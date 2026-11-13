@@ -20,7 +20,7 @@
       </button>
       <button
         class="tb-btn note-btn"
-        :class="{ active: currentNote }"
+        :class="{ active: currentNote, 'note-deleted': noteJustDeleted }"
         :title="currentNote ? 'Edit note' : 'Add note'"
         @click.stop="toggleNote"
       ><StickyNote :size="16" /></button>
@@ -69,7 +69,7 @@
           ><TagIcon :size="16" /></button>
           <button
             class="tb-btn note-btn"
-            :class="{ active: currentNote }"
+            :class="{ active: currentNote, 'note-deleted': noteJustDeleted }"
             :title="currentNote ? 'Edit note' : 'Add note'"
             @click.stop="toggleNote"
           ><StickyNote :size="16" /></button>
@@ -947,10 +947,14 @@ function toggleNote() {
   }
 }
 
+const noteJustDeleted = ref(false)
+let noteDeletedTimer: ReturnType<typeof setTimeout> | null = null
+
 async function saveNote() {
   noteSaving.value = true
   try {
     const note = noteText.value.trim()
+    const wasDeleted = currentNote.value !== '' && note === ''
     await saveArticleNote(props.article.id, note)
     articlesStore.setNote(props.article.id, note)
     currentNote.value = note
@@ -964,6 +968,16 @@ async function saveNote() {
     // star may be there for a reason unrelated to the note by that point.
     if (note && !props.article.marked && !articleHasLabels.value) {
       articlesStore.toggleStar(props.article.id)
+    }
+
+    // The toolbar icon's active color already fades out via .tb-btn's
+    // generic color transition, but that alone looks identical to simply
+    // never having had a note - a brief pulse on the icon itself is the
+    // only cue that something just happened, not merely a state default.
+    if (wasDeleted) {
+      if (noteDeletedTimer) clearTimeout(noteDeletedTimer)
+      noteJustDeleted.value = true
+      noteDeletedTimer = setTimeout(() => { noteJustDeleted.value = false }, 450)
     }
   } finally {
     noteSaving.value = false
@@ -2819,6 +2833,16 @@ watch(
 
 .note-btn.active :deep(path), .note-btn.active :deep(rect) {
   fill: currentColor;
+}
+
+@keyframes note-delete-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.note-btn.note-deleted :deep(svg) {
+  animation: note-delete-pulse 0.45s ease;
 }
 
 :global(.lightbox) {

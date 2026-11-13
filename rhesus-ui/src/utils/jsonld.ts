@@ -1,6 +1,7 @@
 export interface JsonLdArticleMeta {
   author?: string
   publishedAt?: number
+  image?: string
 }
 
 function extractAuthorName(author: unknown): string | undefined {
@@ -22,6 +23,25 @@ function parseDate(value: unknown): number | undefined {
   return Number.isNaN(ts) ? undefined : Math.floor(ts / 1000)
 }
 
+// schema.org's "image" property is deliberately loose: a plain URL string,
+// an array of them (first one wins here), or a full ImageObject node with
+// its own .url. All three show up in the wild.
+function extractImage(image: unknown): string | undefined {
+  if (typeof image === 'string') return image.trim() || undefined
+  if (Array.isArray(image)) {
+    for (const entry of image) {
+      const found = extractImage(entry)
+      if (found) return found
+    }
+    return undefined
+  }
+  if (image && typeof image === 'object' && 'url' in image) {
+    const url = (image as { url?: unknown }).url
+    return typeof url === 'string' ? url.trim() || undefined : undefined
+  }
+  return undefined
+}
+
 function isArticleType(type: unknown): boolean {
   const types = Array.isArray(type) ? type : [type]
   return types.some((t) => typeof t === 'string' && /article/i.test(t))
@@ -41,7 +61,7 @@ function flattenNodes(json: unknown): Record<string, unknown>[] {
 // for SEO rich snippets - either a flat object or an @graph array of
 // interlinked nodes. We only care about the first node whose @type mentions
 // "Article" (NewsArticle, BlogPosting, etc. all match), and only its
-// author/datePublished fields.
+// author/datePublished/image fields.
 export function extractJsonLdMeta(doc: Document): JsonLdArticleMeta {
   const scripts = doc.querySelectorAll('script[type="application/ld+json"]')
   for (const script of scripts) {
@@ -55,7 +75,8 @@ export function extractJsonLdMeta(doc: Document): JsonLdArticleMeta {
     if (!articleNode) continue
     const author = extractAuthorName(articleNode.author)
     const publishedAt = parseDate(articleNode.datePublished ?? articleNode.dateCreated)
-    if (author || publishedAt) return { author, publishedAt }
+    const image = extractImage(articleNode.image)
+    if (author || publishedAt || image) return { author, publishedAt, image }
   }
   return {}
 }

@@ -1335,6 +1335,12 @@ async function toggleFullContent() {
       meta.publishedAt = jsonLdMeta.publishedAt
     }
 
+    // Same "only ever a fallback" rule as author/publishedAt above - read
+    // before Readability can touch the document. og:image is the fallback
+    // of the two since JSON-LD's own image is more often a precise match
+    // for the actual hero image; a site can have either, both, or neither.
+    const heroImageUrl = jsonLdMeta.image || doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || undefined
+
     doc.documentElement.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
     const base = doc.createElement('base')
     base.setAttribute('href', result.url)
@@ -1429,6 +1435,42 @@ async function toggleFullContent() {
     let rawContent: string
     if (article?.content) {
       rawContent = article.content
+      // Readability is a text-density heuristic - on a page that's almost
+      // entirely navigation chrome plus one image and near-zero body text
+      // (a webcomic, say), it can score some unrelated boilerplate block
+      // (a sitewide "join our Patreon" pitch, confirmed directly on a real
+      // site) higher than the sparse element actually holding the real
+      // content, and extract that instead - not a parse failure (article
+      // is non-null), just a wrong pick, so the result.content fallback
+      // above never triggers. When we independently know a hero image
+      // exists (via JSON-LD or og:image, read before Readability ran) and
+      // Readability's chosen content has no images of its own at all,
+      // prepending it directly is a safe, strict improvement.
+      //
+      // Deliberately gated on "Readability kept zero images", not "doesn't
+      // contain this exact URL" - an earlier version checked the latter and
+      // it broke on a real, otherwise-fine extraction: a site's og:image is
+      // frequently just a different-size variant of whatever image
+      // Readability already kept (rte.ie: og:image's "-1600" suffix vs the
+      // article's own "-800" suffix on the very same photo, confirmed
+      // directly), and a plain string match misses that as "not present",
+      // wrongly inserting a visible duplicate of the same photo. Checking
+      // the image count instead of a specific URL match is immune to that -
+      // it only ever fires when Readability's pick is genuinely image-less.
+      const wrapper = new DOMParser().parseFromString(rawContent, 'text/html')
+      if (heroImageUrl && wrapper.querySelectorAll('img').length === 0) {
+        try {
+          const absoluteUrl = new URL(heroImageUrl, result.url).href
+          const figure = wrapper.createElement('figure')
+          const img = wrapper.createElement('img')
+          img.setAttribute('src', absoluteUrl)
+          figure.appendChild(img)
+          wrapper.body.insertBefore(figure, wrapper.body.firstChild)
+          rawContent = wrapper.body.innerHTML
+        } catch {
+          // Malformed heroImageUrl - leave rawContent as Readability produced it.
+        }
+      }
     } else {
       const fallbackDoc = new DOMParser().parseFromString(result.content, 'text/html')
       restrictIframesToAllowlist(fallbackDoc, result.url)

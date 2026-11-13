@@ -34,7 +34,7 @@
         <Share2 :size="16" />
       </button>
       <button
-        class="tb-btn"
+        class="tb-btn newspaper-btn"
         :class="{ active: fullContent !== null }"
         :disabled="fetchingFull"
         :title="fullContent !== null ? 'Show feed content' : 'Fetch full article'"
@@ -85,7 +85,7 @@
             @click.stop="openShareMenu"
           ><Share2 :size="16" /></button>
           <button
-            class="tb-btn"
+            class="tb-btn newspaper-btn"
             :class="{ active: fullContent !== null }"
             :disabled="fetchingFull"
             :title="fullContent !== null ? 'Show feed content' : 'Fetch full article'"
@@ -2432,6 +2432,10 @@ watch(
 
 .tb-btn.active :deep(path), .tb-btn.active :deep(polygon) {
   fill: currentColor;
+}
+
+.newspaper-btn.active {
+  color: maroon;
 }
 
 :global(.label-popup) {

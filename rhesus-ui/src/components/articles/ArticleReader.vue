@@ -1688,6 +1688,37 @@ function markHighlightBoxes(doc: Document) {
   })
 }
 
+// Twitter/X embeds ship as the same empty-placeholder-plus-script pattern as
+// the other platforms fallbackEmptyEmbeds() below handles (a <blockquote
+// class="twitter-tweet"> that platform.twitter.com/widgets.js replaces with
+// a live iframe client-side) - but unlike Instagram, a logged-out viewer can
+// actually see a public tweet's embed (confirmed directly: the widget still
+// renders for anonymous visitors as of October 2026), so this builds that
+// same iframe ourselves instead of falling back to a plain link. Must run
+// before fallbackEmptyEmbeds() so a converted blockquote never reaches it,
+// and before DOMPurify.sanitize() since the permalink lives in a child <a>
+// href, which survives sanitization, but the <blockquote> itself wouldn't
+// survive being swapped for a bare <iframe> after the fact.
+function convertTwitterEmbeds(doc: Document) {
+  doc.querySelectorAll('blockquote.twitter-tweet').forEach((el) => {
+    // The tweet's own permalink is the one child link whose path ends in
+    // /status/<id> - earlier links inside the blockquote are often to
+    // mentions/hashtags within the tweet text itself, not the tweet.
+    const statusHref = Array.from(el.querySelectorAll('a[href]'))
+      .map(a => a.getAttribute('href') ?? '')
+      .find(href => /\/status\/\d+/.test(href))
+    const tweetId = statusHref?.match(/\/status\/(\d+)/)?.[1]
+    // No parseable permalink - leave the blockquote as-is for
+    // fallbackEmptyEmbeds() below to handle the usual way.
+    if (!tweetId) return
+    const iframe = doc.createElement('iframe')
+    iframe.setAttribute('src', `https://platform.twitter.com/embed/Tweet.html?id=${tweetId}`)
+    iframe.setAttribute('loading', 'lazy')
+    iframe.className = 'rhesus-twitter-embed'
+    el.replaceWith(iframe)
+  })
+}
+
 // Social embed widgets (Instagram, TikTok, Facebook, etc.) ship as an empty
 // placeholder element plus a <script> that a real browser on the origin
 // site uses to fetch and render the actual embed client-side. That script
@@ -1770,6 +1801,10 @@ function embedPlatformName(url: string): string {
 const IFRAME_EMBED_ALLOWLIST: { hosts: string[], pathPrefix: string }[] = [
   { hosts: ['youtube.com', 'www.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'], pathPrefix: '/embed/' },
   { hosts: ['player.vimeo.com'], pathPrefix: '/video/' },
+  // Only the single-tweet embed path (see convertTwitterEmbeds()) - not the
+  // whole of platform.twitter.com, which also hosts timeline/moment widgets
+  // this isn't built to generate or vouch for.
+  { hosts: ['platform.twitter.com'], pathPrefix: '/embed/Tweet.html' },
 ]
 
 function isAllowedEmbedSrc(src: string, base: string): boolean {
@@ -1820,6 +1855,7 @@ function processContent(html: string): string {
   // are left alone.
   decodeResidualEntities(pre.body)
   resolveRelativeUrls(pre, props.article.link ?? undefined)
+  convertTwitterEmbeds(pre)
   fallbackEmptyEmbeds(pre)
   restrictIframesToAllowlist(pre, props.article.link ?? location.href)
   pre.querySelectorAll('img[data-caption]').forEach(img => {
@@ -2150,6 +2186,17 @@ watch(
   border: 0;
   border-radius: 4px;
   margin-bottom: 1.5em;
+}
+
+/* A tweet isn't video-shaped, so the generic 16:9 rule above is wrong for
+   it - and since widgets.js never runs here, there's no postMessage-driven
+   auto-resize to match the iframe's height to the actual tweet content the
+   way the real embed does, so this is a fixed height generous enough for
+   most single tweets (with an image, a couple lines of text, etc.); a
+   longer one just scrolls inside its own frame rather than growing it. */
+.reader-content :deep(iframe.rhesus-twitter-embed) {
+  aspect-ratio: auto;
+  height: 550px;
 }
 
 .reader-content :deep(a) {

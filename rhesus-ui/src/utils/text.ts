@@ -46,6 +46,43 @@ export function decodeResidualEntities(root: Element): void {
   }
 }
 
+// The same one-level-too-many escaping, but of inline formatting tags: the
+// feed's HTML carries "&lt;i&gt;caption&lt;/i&gt;", so the article shows
+// the literal text "<i>caption</i>" instead of italics. Seen in KPBS image
+// captions, the San Diego Reader events feed, and links on Hacker News and
+// Kagi News. Run after decodeResidualEntities(), which may be what turns a
+// doubly escaped tag into this literal text.
+//
+// Only an opening and closing pair of the same tag within one text node,
+// with plain text between, becomes a real element, with no attributes. A
+// lone tag could be prose ("the <b> element"), and code samples are left
+// alone entirely.
+const ESCAPED_INLINE_PAIR = /<(i|em|b|strong)>([^<>]*?)<\/\1>/gi
+
+export function restoreEscapedInlineTags(root: Element): void {
+  const doc = root.ownerDocument
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const hits: Text[] = []
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    if (node.parentElement?.closest('code, pre, textarea')) continue
+    if (node.data.search(ESCAPED_INLINE_PAIR) !== -1) hits.push(node)
+  }
+  for (const node of hits) {
+    const frag = doc.createDocumentFragment()
+    let last = 0
+    for (const m of node.data.matchAll(ESCAPED_INLINE_PAIR)) {
+      frag.append(node.data.slice(last, m.index))
+      const el = doc.createElement(m[1]!.toLowerCase())
+      el.textContent = m[2]!
+      frag.append(el)
+      last = m.index + m[0].length
+    }
+    frag.append(node.data.slice(last))
+    node.replaceWith(frag)
+  }
+}
+
 // Some WordPress sites (The Verge's data-caption/data-portal-copyright
 // attributes, at least) build a custom data-* attribute by HTML-entity-
 // escaping an embedded <a href="...">...</a> (so < and > become &lt;/&gt;)

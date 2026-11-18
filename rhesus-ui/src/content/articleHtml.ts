@@ -8,7 +8,7 @@
 // handles. Rules keyed on one site's own markup go in siteRules.ts.
 
 import DOMPurify from 'dompurify'
-import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities } from '@/utils/text'
+import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities, restoreEscapedInlineTags } from '@/utils/text'
 import { stripHtml, removeBrokenImages, resolveRelativeUrls } from './html'
 import { convertTwitterEmbeds, fallbackEmptyEmbeds, restrictIframesToAllowlist, IFRAME_SANITIZE_CONFIG } from './embeds'
 import { applySiteRules } from './siteRules'
@@ -22,6 +22,7 @@ export function processArticleHtml(html: string, articleLink: string | undefined
   // on the parsed tree so attribute values, where a bare &amp; is legitimate,
   // are left alone.
   decodeResidualEntities(pre.body)
+  restoreEscapedInlineTags(pre.body)
   resolveRelativeUrls(pre, articleLink)
   convertTwitterEmbeds(pre)
   fallbackEmptyEmbeds(pre)

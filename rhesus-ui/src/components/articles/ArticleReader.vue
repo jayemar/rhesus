@@ -449,7 +449,11 @@ import { snoozeArticle } from '@/api/snooze'
 import { selfDestructArticle } from '@/api/selfDestruct'
 import { writeToClipboard } from '@/utils/clipboard'
 import { extractJsonLdMeta } from '@/utils/jsonld'
-import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes, decodeResidualEntities } from '@/utils/text'
+import { stripInvisibleEntityArtifacts, fixUnescapedDataAttributeQuotes } from '@/utils/text'
+import { stripHtml, removeBrokenImages, resolveRelativeUrls } from '@/content/html'
+import { IFRAME_SANITIZE_CONFIG, restrictIframesToAllowlist } from '@/content/embeds'
+import { prepareForReadability, addHeroImageIfMissing, READABILITY_OPTIONS } from '@/content/fullPage'
+import { processArticleHtml } from '@/content/articleHtml'
 import { anchorPopupStyle } from '@/utils/popup'
 import { externalLinkDomain } from '@/utils/url'
 import { formatArticleDate } from '@/utils/date'
@@ -1355,80 +1359,9 @@ async function toggleFullContent() {
     // for the actual hero image; a site can have either, both, or neither.
     const heroImageUrl = jsonLdMeta.image || doc.querySelector('meta[property="og:image"]')?.getAttribute('content') || undefined
 
-    doc.documentElement.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
-    const base = doc.createElement('base')
-    base.setAttribute('href', result.url)
-    doc.head.appendChild(base)
-    // Drop caps (Jacobin: <p><span class="po-bo__dropcaps">B</span>y the...)
-    // are the paragraph's own first letter, not UI - unwrap them to plain
-    // text so the sweep below doesn't delete it.
-    doc.querySelectorAll('p > b[class]:first-child, p > span[class]:first-child').forEach(el => {
-      const text = el.textContent ?? ''
-      if (/^\p{L}$/u.test(text.trim()) || /drop-?caps?/i.test(el.className)) el.replaceWith(text)
-    })
-    // Remove site-specific UI control elements hidden by the original page's CSS/JS
-    doc.querySelectorAll('b[class], span[class]').forEach(el => el.remove())
+    prepareForReadability(doc, result.url)
 
-    // Readability discards anything whose class/id contains "header" as page
-    // chrome, which also takes out in-article section headings wrapped that
-    // way (Jacobin: <header class="po-bo__header"><h2>...</h2></header>).
-    // Unwrap when the heading is the wrapper's only child and body text
-    // follows - the site's own masthead has neither.
-    doc.querySelectorAll('h2, h3, h4').forEach(heading => {
-      const wrapper = heading.parentElement
-      if (!wrapper || wrapper.children.length !== 1) return
-      if (!/header/i.test(`${wrapper.className} ${wrapper.id}`)) return
-      if (!wrapper.nextElementSibling?.querySelector('p')) return
-      wrapper.replaceWith(heading)
-    })
-
-    // Normalize image+caption div pairs to semantic <figure>/<figcaption> so
-    // that sites like NPR (which don't use <figure>) get caption styling.
-    doc.querySelectorAll('img:not(figure img)').forEach(img => {
-      const picture = img.closest('picture')
-      const imageNode = picture ?? img
-      const imageWrapper = imageNode.parentElement
-      if (!imageWrapper) return
-      const captionSibling = imageWrapper.nextElementSibling
-      if (!captionSibling) return
-      const captionEl = captionSibling.querySelector('[class*="caption"] p, [aria-label*="caption"] p')
-      if (!captionEl) return
-      const text = captionEl.textContent?.trim()
-      if (!text) return
-      const grandParent = imageWrapper.parentElement
-      if (!grandParent) return
-      const figure = doc.createElement('figure')
-      const figcaption = doc.createElement('figcaption')
-      figcaption.textContent = text
-      figure.appendChild(imageNode.cloneNode(true))
-      figure.appendChild(figcaption)
-      grandParent.insertBefore(figure, imageWrapper)
-      imageWrapper.remove()
-      captionSibling.remove()
-    })
-
-    // Readability's div-conditional-cleaning pass scores every <div> in the
-    // document by its own class/id weight and link density, with no
-    // awareness of a wrapping <blockquote> - a pull-quote whose CMS puts the
-    // styling class on the <blockquote> itself (NPR does this) rather than
-    // the inner <div> gets zero weight credit, so a short, link-heavy quote
-    // (e.g. "...Listen to the full episode here") trips Readability's "low
-    // weight and a little linky" rule and the whole <div> - text and all -
-    // gets deleted, leaving an empty blockquote box. Unwrapping a <div>
-    // that's the sole child of a <blockquote> first removes the div
-    // Readability would flag, without touching the blockquote's actual text.
-    doc.querySelectorAll('blockquote > div:only-child').forEach(div => {
-      while (div.firstChild) div.parentNode?.insertBefore(div.firstChild, div)
-      div.remove()
-    })
-
-    // Readability strips every class but "page" by default - mark highlight
-    // boxes with our own class first and tell it to preserve that one, or
-    // the box styling below never survives extraction.
-    markHighlightBoxes(doc)
-    restrictIframesToAllowlist(doc, result.url)
-
-    const article = new Readability(doc, { classesToPreserve: ['rhesus-highlight-box'] }).parse()
+    const article = new Readability(doc, READABILITY_OPTIONS).parse()
     // Readability is a content-extraction heuristic, not a sanitizer - it
     // strips <script> but leaves things like an onerror= handler on an
     // <img> completely untouched (confirmed directly). This was previously
@@ -1443,48 +1376,12 @@ async function toggleFullContent() {
     // than doc's body - Readability mutates doc destructively as part of
     // trying, even when it ultimately gives up, so by this point doc no
     // longer reflects the original page. That fallback string never passed
-    // through restrictIframesToAllowlist() above (which only ran on doc),
-    // so it needs its own pass here before any iframe in it is eligible to
-    // survive DOMPurify's now-relaxed config.
+    // through prepareForReadability()'s iframe allowlist (which only ran on
+    // doc), so it needs its own pass here before any iframe in it is
+    // eligible to survive DOMPurify's now-relaxed config.
     let rawContent: string
     if (article?.content) {
-      rawContent = article.content
-      // Readability is a text-density heuristic - on a page that's almost
-      // entirely navigation chrome plus one image and near-zero body text
-      // (a webcomic, say), it can score some unrelated boilerplate block
-      // (a sitewide "join our Patreon" pitch, confirmed directly on a real
-      // site) higher than the sparse element actually holding the real
-      // content, and extract that instead - not a parse failure (article
-      // is non-null), just a wrong pick, so the result.content fallback
-      // above never triggers. When we independently know a hero image
-      // exists (via JSON-LD or og:image, read before Readability ran) and
-      // Readability's chosen content has no images of its own at all,
-      // prepending it directly is a safe, strict improvement.
-      //
-      // Deliberately gated on "Readability kept zero images", not "doesn't
-      // contain this exact URL" - an earlier version checked the latter and
-      // it broke on a real, otherwise-fine extraction: a site's og:image is
-      // frequently just a different-size variant of whatever image
-      // Readability already kept (rte.ie: og:image's "-1600" suffix vs the
-      // article's own "-800" suffix on the very same photo, confirmed
-      // directly), and a plain string match misses that as "not present",
-      // wrongly inserting a visible duplicate of the same photo. Checking
-      // the image count instead of a specific URL match is immune to that -
-      // it only ever fires when Readability's pick is genuinely image-less.
-      const wrapper = new DOMParser().parseFromString(rawContent, 'text/html')
-      if (heroImageUrl && wrapper.querySelectorAll('img').length === 0) {
-        try {
-          const absoluteUrl = new URL(heroImageUrl, result.url).href
-          const figure = wrapper.createElement('figure')
-          const img = wrapper.createElement('img')
-          img.setAttribute('src', absoluteUrl)
-          figure.appendChild(img)
-          wrapper.body.insertBefore(figure, wrapper.body.firstChild)
-          rawContent = wrapper.body.innerHTML
-        } catch {
-          // Malformed heroImageUrl - leave rawContent as Readability produced it.
-        }
-      }
+      rawContent = addHeroImageIfMissing(article.content, heroImageUrl, result.url)
     } else {
       const fallbackDoc = new DOMParser().parseFromString(result.content, 'text/html')
       restrictIframesToAllowlist(fallbackDoc, result.url)
@@ -1573,11 +1470,6 @@ function bestSrcsetUrl(srcset: string): string | null {
   return (covering ?? sized[sized.length - 1]!).url
 }
 
-// Strip HTML tags from a string to get plain text.
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, '').trim()
-}
-
 // Detect small icon/share-button images by declared size: both width and height
 // present and <= 50px. Some themes/plugins (e.g. "Social Media Feather") inject
 // share-button icons directly into post content, which would otherwise be picked
@@ -1608,11 +1500,7 @@ function parseHero(content: string): { src: string | null; alt: string; caption:
   // which then passes every later "is this broken?" check and gets wrongly
   // selected as the hero image - confirmed directly against a real NPR
   // article that did exactly this.
-  doc.querySelectorAll('img[src]').forEach(el => {
-    const src = el.getAttribute('src') ?? ''
-    if (src === 'undefined' || src === '' || src === 'null' || /\/tracking[/.]|[-_]pixel\./i.test(src))
-      el.remove()
-  })
+  removeBrokenImages(doc)
 
   // Resolve relative image/link URLs (e.g. a site emitting <img src="../media/x.jpg">)
   // before picking a hero candidate - otherwise a relative src extracted here would
@@ -1696,329 +1584,8 @@ const heroCaption = computed(() => {
   return parsedHero.value?.caption ?? ''
 })
 
-function resolveRelativeUrls(doc: Document, baseUrl: string | undefined): void {
-  if (!baseUrl) return
-  let base: URL
-  try { base = new URL(baseUrl) } catch { return }
-  // normalizedContent() deliberately strips our own TT-RSS server's origin from
-  // /tt-rss/-rooted URLs (image cache paths, etc.) so they resolve relative to
-  // whatever host the SPA is served from. Those must not be re-absolutized
-  // against the article's own site here, or they'd point at the wrong origin.
-  doc.querySelectorAll('img[src]').forEach(el => {
-    const src = el.getAttribute('src')
-    if (src && !src.startsWith('http') && !src.startsWith('//') && !src.startsWith('data:') && !src.startsWith('/tt-rss/'))
-      try { el.setAttribute('src', new URL(src, base).href) } catch {}
-  })
-  doc.querySelectorAll('a[href]').forEach(el => {
-    const href = el.getAttribute('href')
-    if (href && !href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('/tt-rss/'))
-      try { el.setAttribute('href', new URL(href, base).href) } catch {}
-  })
-}
-
-// Pull quotes are an editorial/typographic device (usually a sentence
-// repeated from the surrounding body text, set apart for emphasis) rather
-// than a real quotation - there's no HTML5 semantic element for them the
-// way <blockquote> covers actual quotes. The de facto convention across
-// CMSs is a class name containing some form of "pull quote", so that's the
-// only generally reliable signal available.
-function markPullQuotes(doc: Document) {
-  doc.querySelectorAll('[class*="pull-quote" i], [class*="pullquote" i], [class*="pull_quote" i]').forEach((el) => {
-    // A bare <span> match is usually centered inside a wrapping <p> (e.g.
-    // Tricycle: <p style="text-align:center"><span class="pull-quote">...).
-    // Marking the <span> itself would only box the inline text, not the
-    // paragraph - style the wrapping block instead when there is one.
-    const target = el.tagName === 'SPAN' ? (el.closest('p') ?? el) : el
-    target.classList.add('rhesus-pull-quote')
-  })
-}
-
-// Vox Media's Duet CMS (The Verge, Polygon, SB Nation, Eater, etc.) boxes
-// off editorial asides - AMA plugs, related-coverage nudges - in a
-// "highlight" block that's visually set apart from the surrounding body
-// text on the original site. Left unmarked, it reads as an abrupt topic
-// change mid-article instead of a set-off aside. Smithsonian's "Did you
-// know?" asides (div.insight) are the same kind of thing; their title is a
-// <p class="h4-style">, which Readability would strip down to a plain
-// paragraph, so it becomes a real heading here.
-function markHighlightBoxes(doc: Document) {
-  doc.querySelectorAll('[class*="duet--article--highlight" i], div.insight').forEach((el) => {
-    el.classList.add('rhesus-highlight-box')
-    el.querySelectorAll('p.h4-style').forEach((p) => {
-      const h = doc.createElement('h3')
-      h.innerHTML = p.innerHTML
-      p.replaceWith(h)
-    })
-  })
-}
-
-// Twitter/X embeds ship as the same empty-placeholder-plus-script pattern as
-// the other platforms fallbackEmptyEmbeds() below handles (a <blockquote
-// class="twitter-tweet"> that platform.twitter.com/widgets.js replaces with
-// a live iframe client-side) - but unlike Instagram, a logged-out viewer can
-// actually see a public tweet's embed (confirmed directly: the widget still
-// renders for anonymous visitors as of October 2026), so this builds that
-// same iframe ourselves instead of falling back to a plain link. Must run
-// before fallbackEmptyEmbeds() so a converted blockquote never reaches it,
-// and before DOMPurify.sanitize() since the permalink lives in a child <a>
-// href, which survives sanitization, but the <blockquote> itself wouldn't
-// survive being swapped for a bare <iframe> after the fact.
-function convertTwitterEmbeds(doc: Document) {
-  doc.querySelectorAll('blockquote.twitter-tweet').forEach((el) => {
-    // The tweet's own permalink is the one child link whose path ends in
-    // /status/<id> - earlier links inside the blockquote are often to
-    // mentions/hashtags within the tweet text itself, not the tweet.
-    const statusHref = Array.from(el.querySelectorAll('a[href]'))
-      .map(a => a.getAttribute('href') ?? '')
-      .find(href => /\/status\/\d+/.test(href))
-    const tweetId = statusHref?.match(/\/status\/(\d+)/)?.[1]
-    // No parseable permalink - leave the blockquote as-is for
-    // fallbackEmptyEmbeds() below to handle the usual way.
-    if (!tweetId) return
-    const iframe = doc.createElement('iframe')
-    iframe.setAttribute('src', `https://platform.twitter.com/embed/Tweet.html?id=${tweetId}`)
-    iframe.setAttribute('loading', 'lazy')
-    iframe.className = 'rhesus-twitter-embed'
-    el.replaceWith(iframe)
-  })
-}
-
-// Social embed widgets (Instagram, TikTok, Facebook, etc.) ship as an empty
-// placeholder element plus a <script> that a real browser on the origin
-// site uses to fetch and render the actual embed client-side. That script
-// never runs here (DOMPurify strips it, and tracker-blockers like Privacy
-// Badger would block it anyway even if it did), so the placeholder renders
-// as a blank box. Must run before DOMPurify.sanitize() - the permalink is
-// usually itself a data-* attribute, which DOMPurify strips by default.
-function fallbackEmptyEmbeds(doc: Document) {
-  const selector = [
-    'blockquote.instagram-media',
-    'blockquote.twitter-tweet',
-    'blockquote.tiktok-embed',
-    'blockquote.fb-xfbml-parse-ignore',
-    'div.fb-video',
-    'div.fb-post',
-    // A <canvas> element (e.g. a Chart.js graph) is only ever populated by
-    // JavaScript, which never runs here - it otherwise sits as a large,
-    // completely blank box reserving its declared width/height (a "hero
-    // image" -shaped gap with nothing in it). No permalink-style attribute
-    // to recover a source link from, so this always falls through to the
-    // plain "content removed" note below rather than a "View on..." link.
-    'canvas',
-  ].join(',')
-  doc.querySelectorAll(selector).forEach((el) => {
-    // Some platforms (Twitter's static fallback markup, most TikTok embeds)
-    // already include real, readable text - leave those alone entirely.
-    // Instagram is the one exception: whenever data-instgrm-captioned is
-    // set, its skeleton-loader placeholder bakes in text too ("View this
-    // post on Instagram" / "A post shared by X") - but that's always
-    // generic boilerplate, never the post's actual caption or content, so
-    // it's never worth keeping over the small fallback link below. Left
-    // as-is, it renders as a large, mostly-empty box sized to match the
-    // real embed that never loads.
-    const isInstagram = el.matches('blockquote.instagram-media')
-    if (!isInstagram && el.textContent?.trim()) return
-    const url =
-      el.getAttribute('data-instgrm-permalink') ||
-      el.getAttribute('cite') ||
-      el.getAttribute('data-href') ||
-      el.querySelector('a[href]')?.getAttribute('href') ||
-      null
-    if (!url) {
-      const note = doc.createElement('p')
-      note.className = 'rhesus-embed-removed'
-      note.textContent = 'Embedded content removed - open the original article to view it.'
-      el.replaceWith(note)
-      return
-    }
-    const link = doc.createElement('a')
-    link.setAttribute('href', url)
-    link.setAttribute('target', '_blank')
-    link.setAttribute('rel', 'noopener noreferrer')
-    link.className = 'rhesus-embed-fallback'
-    link.textContent = `View on ${embedPlatformName(url)} ↗`
-    el.replaceWith(link)
-  })
-}
-
-function embedPlatformName(url: string): string {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, '')
-    if (host.includes('instagram')) return 'Instagram'
-    if (host.includes('tiktok')) return 'TikTok'
-    if (host === 'x.com' || host.includes('twitter')) return 'X'
-    if (host.includes('facebook')) return 'Facebook'
-    return host
-  } catch {
-    return 'original post'
-  }
-}
-
-// Trusted video-embed providers whose <iframe> we let through. DOMPurify's
-// default config strips every <iframe> outright - for good reason, since an
-// arbitrary third-party iframe can host anything from a phishing page to an
-// invisible tracking frame - so carving out an exception means narrowing to
-// a short list of known, single-purpose embed origins first, checked by
-// hostname *and* the provider's own embed-path convention (an arbitrary
-// youtube.com page is not the same trust boundary as the embed player
-// itself, even though they share a host).
-const IFRAME_EMBED_ALLOWLIST: { hosts: string[], pathPrefix: string }[] = [
-  { hosts: ['youtube.com', 'www.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'], pathPrefix: '/embed/' },
-  { hosts: ['player.vimeo.com'], pathPrefix: '/video/' },
-  // Only the single-tweet embed path (see convertTwitterEmbeds()) - not the
-  // whole of platform.twitter.com, which also hosts timeline/moment widgets
-  // this isn't built to generate or vouch for.
-  { hosts: ['platform.twitter.com'], pathPrefix: '/embed/Tweet.html' },
-]
-
-function isAllowedEmbedSrc(src: string, base: string): boolean {
-  try {
-    const url = new URL(src, base)
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
-    return IFRAME_EMBED_ALLOWLIST.some(({ hosts, pathPrefix }) =>
-      hosts.includes(url.hostname) && url.pathname.startsWith(pathPrefix))
-  } catch {
-    return false
-  }
-}
-
-// Must run before DOMPurify.sanitize() - and before that call is given
-// ADD_TAGS: ['iframe'] to let any <iframe> at all survive - so that only
-// ones already confirmed trusted here are still present by the time that
-// exception applies. An iframe failing the allowlist is simply removed, the
-// same outcome DOMPurify's own default (no iframe support at all) already
-// produces for it today.
-function restrictIframesToAllowlist(doc: Document, base: string): void {
-  doc.querySelectorAll('iframe').forEach((el) => {
-    const src = el.getAttribute('src')
-    if (!src || !isAllowedEmbedSrc(src, base)) {
-      el.remove()
-    }
-  })
-}
-
-// Shared by both content pipelines (see processContent() and
-// toggleFullContent()) so the allowed attribute/tag set can't drift between
-// them.
-const IFRAME_SANITIZE_CONFIG = {
-  ADD_TAGS: ['iframe'],
-  ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'referrerpolicy'],
-}
-
 function processContent(html: string): string {
-  // Preprocess before DOMPurify strips data-* attributes: move data-caption
-  // into alt (for lightbox) and figcaption (for below-image display) when empty.
-  const pre = new DOMParser().parseFromString(fixUnescapedDataAttributeQuotes(stripInvisibleEntityArtifacts(html)), 'text/html')
-  pre.querySelectorAll('img[src]').forEach(el => {
-    const src = el.getAttribute('src') ?? ''
-    if (src === 'undefined' || src === '' || src === 'null' || /\/tracking[/.]|[-_]pixel\./i.test(src))
-      el.remove()
-  })
-  // Repair entities the feed escaped one level too many (see text.ts). Done
-  // on the parsed tree so attribute values, where a bare &amp; is legitimate,
-  // are left alone.
-  decodeResidualEntities(pre.body)
-  resolveRelativeUrls(pre, props.article.link ?? undefined)
-  convertTwitterEmbeds(pre)
-  fallbackEmptyEmbeds(pre)
-  restrictIframesToAllowlist(pre, props.article.link ?? location.href)
-  pre.querySelectorAll('img[data-caption]').forEach(img => {
-    const dc = img.getAttribute('data-caption') ?? ''
-    const dcText = stripHtml(dc)
-    if (!dcText) return
-    const fig = img.closest('figure')
-    if (fig) {
-      const fc = fig.querySelector('figcaption')
-      if (fc && !fc.textContent?.trim()) fc.textContent = dcText
-    } else {
-      const figure = pre.createElement('figure')
-      const figcaption = pre.createElement('figcaption')
-      figcaption.textContent = dcText
-      img.parentNode?.insertBefore(figure, img)
-      figure.appendChild(img)
-      figure.appendChild(figcaption)
-    }
-  })
-  const sanitized = DOMPurify.sanitize(pre.body.innerHTML, IFRAME_SANITIZE_CONFIG)
-  const doc = new DOMParser().parseFromString(sanitized, 'text/html')
-  // A read-only sanitized article body has no legitimate use for an
-  // interactive <button> - some feeds (Substack's image zoom/enlarge
-  // controls, embedded directly in content:encoded) ship them anyway.
-  // DOMPurify's default allowlist permits <button>/<svg> as ordinary,
-  // non-dangerous HTML, so they survive sanitization and render as inert
-  // icon clutter unless removed here.
-  doc.querySelectorAll('button').forEach(el => el.remove())
-  // Line breaks with nothing after them but whitespace or a closing bracket
-  // before the paragraph ends only add blank lines - NPR's image credits come
-  // as "(Image credit: Name<br/><br/>)", which rendered as three lines with
-  // the ")" alone on the last.
-  doc.querySelectorAll('p br, figcaption br').forEach(br => {
-    let n = br.nextSibling
-    while (n && (n.nodeName === 'BR' || (n.nodeType === Node.TEXT_NODE && /^[\s)\]]*$/.test(n.textContent ?? '')))) {
-      n = n.nextSibling
-    }
-    if (!n) br.remove()
-  })
-  // A blockquote can end up with no real content for reasons outside our
-  // control (Readability stripping a div-wrapped quote it judged "shady",
-  // a malformed feed, etc.) - the CSS below still borders/backgrounds it
-  // regardless, so leaving it in place renders as a visibly broken,
-  // decorated box with nothing inside. Drop it outright instead. A
-  // blockquote embedding only media (no text) is left alone - that's not
-  // "empty" in the sense that matters here.
-  doc.querySelectorAll('blockquote').forEach(bq => {
-    const hasText = !!bq.textContent?.trim()
-    const hasMedia = !!bq.querySelector('img, video, iframe, svg')
-    if (!hasText && !hasMedia) bq.remove()
-  })
-  // Some sites wrap a pull quote in an outer <blockquote> used purely as a
-  // styling frame, with the actual quote in a nested <blockquote> inside it.
-  // Hearst's pattern is:
-  //   <blockquote data-theme-key="pullquote">
-  //     <span aria-hidden="true"></span>          (empty, decorative)
-  //     <blockquote>the actual quote</blockquote>
-  //     <span aria-hidden="true"></span>
-  //   </blockquote>
-  // Their CSS turns the outer into a pull-quote frame; here both are just
-  // <blockquote>, so the reader draws two sets of indent and border, one
-  // inside the other. Collapse the outer when it contributes nothing of its
-  // own. A genuine quote-within-a-quote has its own text or media alongside
-  // the nested one, and is left alone.
-  doc.querySelectorAll('blockquote > blockquote').forEach(inner => {
-    const outer = inner.parentElement
-    if (!outer || outer.querySelectorAll('blockquote').length !== 1) return
-    const ownNodes = Array.from(outer.childNodes).filter(n => n !== inner)
-    if (ownNodes.some(n => (n.textContent ?? '').trim())) return
-    // matches() as well as querySelector(): the media may *be* the sibling
-    // node rather than sit inside it.
-    const MEDIA = 'img, video, iframe, svg'
-    if (ownNodes.some(n => n instanceof Element && (n.matches(MEDIA) || n.querySelector(MEDIA)))) return
-    // Carry the outer's classes over so the pull-quote marker set above (and
-    // any site class markPullQuotes matches on) survives the unwrap.
-    outer.classList.forEach(c => inner.classList.add(c))
-    outer.replaceWith(inner)
-  })
-  markPullQuotes(doc)
-  markHighlightBoxes(doc)
-  // Defer decoding of article images until they approach the viewport. Without
-  // this the browser decodes every image in the article at once, at full
-  // natural resolution regardless of the max-width: 100% it is displayed at -
-  // a long full-fetched article can hold hundreds of MB of decoded bitmaps.
-  // On a memory-pressured device that starves the graphics caches, and the
-  // first thing to fall over is the glyph atlas: shapes still paint while text
-  // vanishes (see READER-KEYBOARD-VIEWPORT-FLASH.md). Applied after
-  // DOMPurify.sanitize() above, which would otherwise strip these attributes.
-  doc.querySelectorAll('img').forEach(img => {
-    img.setAttribute('loading', 'lazy')
-    img.setAttribute('decoding', 'async')
-  })
-  doc.querySelectorAll('table').forEach(table => {
-    const wrapper = doc.createElement('div')
-    wrapper.className = 'table-scroll'
-    table.parentNode?.insertBefore(wrapper, table)
-    wrapper.appendChild(table)
-  })
-  return doc.body.innerHTML
+  return processArticleHtml(html, props.article.link ?? undefined)
 }
 
 const readerContent = computed(() => {

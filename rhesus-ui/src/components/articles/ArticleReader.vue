@@ -1737,10 +1737,18 @@ function markPullQuotes(doc: Document) {
 // off editorial asides - AMA plugs, related-coverage nudges - in a
 // "highlight" block that's visually set apart from the surrounding body
 // text on the original site. Left unmarked, it reads as an abrupt topic
-// change mid-article instead of a set-off aside.
+// change mid-article instead of a set-off aside. Smithsonian's "Did you
+// know?" asides (div.insight) are the same kind of thing; their title is a
+// <p class="h4-style">, which Readability would strip down to a plain
+// paragraph, so it becomes a real heading here.
 function markHighlightBoxes(doc: Document) {
-  doc.querySelectorAll('[class*="duet--article--highlight" i]').forEach((el) => {
+  doc.querySelectorAll('[class*="duet--article--highlight" i], div.insight').forEach((el) => {
     el.classList.add('rhesus-highlight-box')
+    el.querySelectorAll('p.h4-style').forEach((p) => {
+      const h = doc.createElement('h3')
+      h.innerHTML = p.innerHTML
+      p.replaceWith(h)
+    })
   })
 }
 
